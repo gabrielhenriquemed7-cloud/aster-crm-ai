@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { getRequestOrigin } from "@/lib/site-url";
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -23,16 +24,13 @@ export async function updateSession(request: NextRequest) {
   const isOnboardingRoute = request.nextUrl.pathname.startsWith("/onboarding");
 
   if (!user && !isAuthRoute) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/login";
+    const redirectUrl = new URL("/login", getRequestOrigin(request));
     redirectUrl.searchParams.set("next", request.nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);
   }
 
   if (user && ["/login", "/signup", "/forgot-password"].includes(request.nextUrl.pathname)) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/dashboard";
-    redirectUrl.search = "";
+    const redirectUrl = new URL("/dashboard", getRequestOrigin(request));
     return NextResponse.redirect(redirectUrl);
   }
   if (user && !isOnboardingRoute && !request.nextUrl.pathname.startsWith("/auth/")) {
@@ -41,9 +39,7 @@ export async function updateSession(request: NextRequest) {
       ? await supabase.from("clinic_members").select("id").eq("user_id", user.id).eq("clinic_id", profile.active_clinic_id).eq("status", "active").maybeSingle()
       : { data: null, error: null };
     if (!profileError && !membershipError && (!profile?.active_clinic_id || !membership)) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = "/onboarding";
-      redirectUrl.search = "";
+      const redirectUrl = new URL("/onboarding", getRequestOrigin(request));
       return NextResponse.redirect(redirectUrl);
     }
   }

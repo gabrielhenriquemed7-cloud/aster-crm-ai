@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getSiteUrl } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/client";
 
 const credentialsSchema = z.object({ email: z.string().email("Informe um e-mail válido."), password: z.string().min(8, "A senha deve ter ao menos 8 caracteres.") });
@@ -24,19 +25,19 @@ function Submit({ loading, children }: { loading: boolean; children: ReactNode }
 
 export function LoginForm({ nextPath }: { nextPath?: string }) {
   const router = useRouter(); const [loading, setLoading] = useState(false); const form = useForm<z.infer<typeof credentialsSchema>>({ resolver: zodResolver(credentialsSchema), defaultValues: { email: "", password: "" } });
-  async function submit(values: z.infer<typeof credentialsSchema>) { setLoading(true); const { error } = await createClient().auth.signInWithPassword(values); setLoading(false); if (error) return toast.error("E-mail ou senha inválidos."); router.push(nextPath || "/dashboard"); router.refresh(); }
+  async function submit(values: z.infer<typeof credentialsSchema>) { setLoading(true); const { error } = await createClient().auth.signInWithPassword(values); setLoading(false); if (error) return toast.error("E-mail ou senha inválidos."); const destination = nextPath?.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/dashboard"; router.push(destination); router.refresh(); }
   return <form onSubmit={form.handleSubmit(submit)} className="space-y-3"><Field label="E-mail" type="email" {...form.register("email")} error={form.formState.errors.email?.message} /><Field label="Senha" type="password" {...form.register("password")} error={form.formState.errors.password?.message} /><div className="text-right"><Link className="text-sm font-medium text-primary hover:underline" href="/forgot-password">Esqueci minha senha</Link></div><Submit loading={loading}>Entrar</Submit><p className="pt-3 text-center text-sm text-muted-foreground">Ainda não possui conta? <Link className="font-medium text-primary hover:underline" href="/signup">Criar conta</Link></p></form>;
 }
 
 export function SignupForm() {
   const [loading, setLoading] = useState(false); const form = useForm<z.infer<typeof signupSchema>>({ resolver: zodResolver(signupSchema), defaultValues: { fullName: "", email: "", password: "" } });
-  async function submit(values: z.infer<typeof signupSchema>) { setLoading(true); const { error } = await createClient().auth.signUp({ email: values.email, password: values.password, options: { data: { full_name: values.fullName }, emailRedirectTo: `${window.location.origin}/auth/callback` } }); setLoading(false); if (error) return toast.error(error.message); toast.success("Conta criada. Verifique seu e-mail para confirmar o cadastro."); form.reset(); }
+  async function submit(values: z.infer<typeof signupSchema>) { setLoading(true); const { error } = await createClient().auth.signUp({ email: values.email, password: values.password, options: { data: { full_name: values.fullName }, emailRedirectTo: `${getSiteUrl()}/auth/callback` } }); setLoading(false); if (error) return toast.error(error.message); toast.success("Conta criada. Verifique seu e-mail para confirmar o cadastro."); form.reset(); }
   return <form onSubmit={form.handleSubmit(submit)} className="space-y-3"><Field label="Nome completo" {...form.register("fullName")} error={form.formState.errors.fullName?.message} /><Field label="E-mail" type="email" {...form.register("email")} error={form.formState.errors.email?.message} /><Field label="Senha" type="password" {...form.register("password")} error={form.formState.errors.password?.message} /><p className="text-xs text-muted-foreground">Novas contas iniciam como Recepcionista. Perfis administrativos são atribuídos pela clínica.</p><Submit loading={loading}>Criar conta</Submit><p className="pt-3 text-center text-sm text-muted-foreground">Já possui conta? <Link className="font-medium text-primary hover:underline" href="/login">Entrar</Link></p></form>;
 }
 
 export function ForgotPasswordForm() {
   const [loading, setLoading] = useState(false); const form = useForm<z.infer<typeof emailSchema>>({ resolver: zodResolver(emailSchema), defaultValues: { email: "" } });
-  async function submit(values: z.infer<typeof emailSchema>) { setLoading(true); const { error } = await createClient().auth.resetPasswordForEmail(values.email, { redirectTo: `${window.location.origin}/auth/callback?next=/reset-password` }); setLoading(false); if (error) return toast.error(error.message); toast.success("Enviamos as instruções para seu e-mail."); }
+  async function submit(values: z.infer<typeof emailSchema>) { setLoading(true); const { error } = await createClient().auth.resetPasswordForEmail(values.email, { redirectTo: `${getSiteUrl()}/auth/callback?next=/reset-password` }); setLoading(false); if (error) return toast.error(error.message); toast.success("Enviamos as instruções para seu e-mail."); }
   return <form onSubmit={form.handleSubmit(submit)} className="space-y-3"><Field label="E-mail" type="email" {...form.register("email")} error={form.formState.errors.email?.message} /><Submit loading={loading}>Enviar instruções</Submit><p className="pt-3 text-center text-sm"><Link className="font-medium text-primary hover:underline" href="/login">Voltar para login</Link></p></form>;
 }
 

@@ -42,20 +42,20 @@ interface SidebarProps {
 }
 
 const navigationItems: NavigationItem[] = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/appointments", label: "Agenda", icon: CalendarDays },
   { href: "/patients", label: "Pacientes", icon: UsersRound },
-  { href: "/consultas", label: "Consultas", icon: ClipboardList },
+  { href: "/appointments", label: "Consultas", icon: ClipboardList },
   { href: "/ia-clinica", label: "IA Clínica", icon: Bot },
   { href: "/financeiro", label: "Financeiro", icon: CircleDollarSign },
   { href: "/relatorios", label: "Relatórios", icon: FileBarChart2 },
-  { href: "/configuracoes", label: "Configurações", icon: Settings },
+  { href: "/settings/team", label: "Configurações", icon: Settings },
 ];
 
 function Brand({ collapsed }: { collapsed: boolean }) {
   return (
     <Link
-      href="/"
+      href="/dashboard"
       className={cn("flex items-center gap-2.5", collapsed && "justify-center")}
       aria-label="ASTER CRM AI"
     >
@@ -111,7 +111,7 @@ function SidebarContent({
       >
         {navigationItems.map((item) => (
           <SidebarItem
-            key={item.href}
+            key={`${item.href}-${item.label}`}
             collapsed={collapsed}
             onNavigate={onNavigate}
             {...item}
