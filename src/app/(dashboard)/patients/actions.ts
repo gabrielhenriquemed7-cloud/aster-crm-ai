@@ -63,10 +63,12 @@ export async function createPatient(values: PatientFormValues, photo?: File): Pr
   if (!supabase) return { error: "Configure o Supabase para cadastrar pacientes." };
   const { data: authData } = await supabase.auth.getUser();
   if (!authData.user) return { error: "Faça login para cadastrar pacientes." };
+  const { data: profile } = await supabase.from("profiles").select("active_clinic_id").eq("id", authData.user.id).maybeSingle();
+  if (!profile?.active_clinic_id) return { error: "Selecione ou crie uma clínica antes de cadastrar pacientes." };
 
   const { data, error } = await supabase
     .from("patients")
-    .insert({ ...toPatientInput(parsed.data), user_id: authData.user.id })
+    .insert({ ...toPatientInput(parsed.data), user_id: authData.user.id, clinic_id: profile.active_clinic_id })
     .select("id")
     .single();
   if (error || !data) return { error: "Não foi possível cadastrar o paciente." };

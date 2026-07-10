@@ -1,10 +1,12 @@
 "use client";
 
-import { Moon, Search, Sun } from "lucide-react";
+import { Moon, Plus, Search, Sun } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 
 import { Notifications } from "@/components/layout/notifications";
+import { ClinicSwitcher } from "@/components/clinics/clinic-switcher";
 import { SearchBar } from "@/components/layout/search-bar";
 import { Sidebar } from "@/components/layout/sidebar";
 import { UserMenu } from "@/components/layout/user-menu";
@@ -22,11 +24,16 @@ export function Header() {
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 h-16 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/65">
-      <div className="mx-auto flex h-full max-w-[1600px] items-center gap-3 px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/65">
+      <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 sm:px-6 lg:px-8">
         <Sidebar mobileOnly />
+        <div className="hidden sm:block"><ClinicSwitcher /></div>
         <SearchBar />
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex items-center gap-2">
+          <Button render={<Link href="/patients/new" />} className="hidden cursor-pointer md:inline-flex" size="sm" variant="secondary" aria-label="Novo paciente">
+            <Plus className="size-4" aria-hidden="true" />
+            Novo paciente
+          </Button>
           <Button
             variant="ghost"
             size="icon"

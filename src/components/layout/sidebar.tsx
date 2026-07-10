@@ -43,7 +43,7 @@ interface SidebarProps {
 
 const navigationItems: NavigationItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/agenda", label: "Agenda", icon: CalendarDays },
+  { href: "/appointments", label: "Agenda", icon: CalendarDays },
   { href: "/patients", label: "Pacientes", icon: UsersRound },
   { href: "/consultas", label: "Consultas", icon: ClipboardList },
   { href: "/ia-clinica", label: "IA Clínica", icon: Bot },

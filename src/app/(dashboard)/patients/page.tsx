@@ -24,7 +24,7 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
   return <section>
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div><p className="text-sm text-muted-foreground">Cadastros da clínica</p><h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">Pacientes</h1></div>
-      <Button render={<Link href="/patients/new" />}><Plus /> Novo paciente</Button>
+      <Button render={<Link href="/patients/new" />} className="cursor-pointer" aria-label="Novo paciente"><Plus /> Novo paciente</Button>
     </div>
     <Card className="mt-7 gap-0 py-0 shadow-none">
       <CardContent className="p-5"><PatientFilters /></CardContent>

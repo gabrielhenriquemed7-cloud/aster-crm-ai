@@ -1,0 +1,15 @@
+import { CalendarDays, Plus } from "lucide-react";
+import Link from "next/link";
+import { getAppointmentFormData, listAppointments } from "@/app/(dashboard)/appointments/actions";
+import { AppointmentCalendar } from "@/components/appointments/calendar";
+import { AppointmentFilters } from "@/components/appointments/appointment-filters";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { appointmentStatusLabels } from "@/lib/appointments/types";
+
+function isoDate(value: Date) { return value.toISOString().slice(0, 10); }
+export default async function AppointmentsPage({ searchParams }: { searchParams: Promise<{ date?: string; q?: string; doctor?: string }> }) {
+  const params = await searchParams; const date = /^\d{4}-\d{2}-\d{2}$/.test(params.date ?? "") ? params.date! : isoDate(new Date()); const anchor = new Date(`${date}T12:00:00`); const from = new Date(anchor.getFullYear(), anchor.getMonth(), 1).toISOString(); const to = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1).toISOString(); const [appointments, formData] = await Promise.all([listAppointments({ from, to, search: params.q, doctorId: params.doctor }), getAppointmentFormData()]);
+  return <section><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm text-muted-foreground">Agenda clínica</p><h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">Consultas</h1></div><Button render={<Link href="/appointments/new" />}><Plus /> Nova consulta</Button></div><div className="mt-6"><AppointmentFilters doctors={formData.doctors} /></div><div className="mt-4 grid gap-6 xl:grid-cols-[1fr_320px]"><AppointmentCalendar appointments={appointments} date={date} /><Card className="shadow-none"><CardHeader><CardTitle className="flex items-center gap-2"><CalendarDays className="size-4 text-primary" /> Lista de consultas</CardTitle></CardHeader><CardContent className="space-y-3">{appointments.map((item) => <Link key={item.id} href={`/appointments/${item.id}/edit`} className="block rounded-lg border p-3 transition-colors hover:bg-muted/40"><div className="flex items-start justify-between gap-2"><div><p className="text-sm font-medium">{item.patient?.full_name || "Paciente"}</p><p className="mt-1 text-xs text-muted-foreground">{new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(item.starts_at))}</p></div><Badge variant={item.status === "cancelled" || item.status === "no_show" ? "destructive" : item.status === "confirmed" ? "secondary" : "outline"}>{appointmentStatusLabels[item.status]}</Badge></div><p className="mt-2 text-xs text-muted-foreground">{item.appointment_type}</p></Link>)}{!appointments.length && <p className="py-10 text-center text-sm text-muted-foreground">Nenhuma consulta neste período.</p>}</CardContent></Card></div></section>;
+}

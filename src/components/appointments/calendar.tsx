@@ -1,0 +1,21 @@
+"use client";
+
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { Appointment } from "@/lib/appointments/types";
+
+type View = "month" | "week" | "day";
+const statusClass: Record<string, string> = { scheduled: "bg-blue-500", confirmed: "bg-emerald-500", in_progress: "bg-amber-500", completed: "bg-slate-500", cancelled: "bg-rose-500", no_show: "bg-orange-500" };
+function dateKey(value: Date) { return value.toISOString().slice(0, 10); }
+function formatTime(value: string) { return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
+export function AppointmentCalendar({ appointments, date }: { appointments: Appointment[]; date: string }) {
+  const [view, setView] = useState<View>("month"); const active = useMemo(() => new Date(`${date}T12:00:00`), [date]);
+  const byDay = useMemo(() => appointments.reduce<Record<string, Appointment[]>>((acc, item) => { const key = dateKey(new Date(item.starts_at)); (acc[key] ??= []).push(item); return acc; }, {}), [appointments]);
+  const days = useMemo(() => { const start = new Date(active.getFullYear(), active.getMonth(), 1); start.setDate(start.getDate() - start.getDay()); return Array.from({ length: 42 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day; }); }, [active]);
+  const shift = (amount: number) => { const next = new Date(active); if (view === "month") next.setMonth(next.getMonth() + amount); else next.setDate(next.getDate() + amount * (view === "week" ? 7 : 1)); return `/appointments?date=${dateKey(next)}`; };
+  const visibleDays = view === "month" ? days : Array.from({ length: view === "week" ? 7 : 1 }, (_, index) => { const day = new Date(active); if (view === "week") day.setDate(active.getDate() - active.getDay() + index); return day; });
+  return <section className="rounded-xl border bg-card shadow-none"><div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2"><Button render={<Link href={shift(-1)} />} variant="outline" size="icon-sm" aria-label="Período anterior"><ChevronLeft /></Button><p className="min-w-44 text-center text-sm font-semibold capitalize">{new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(active)}</p><Button render={<Link href={shift(1)} />} variant="outline" size="icon-sm" aria-label="Próximo período"><ChevronRight /></Button></div><div className="flex gap-1"><Button variant={view === "month" ? "secondary" : "ghost"} size="sm" onClick={() => setView("month")}>Mês</Button><Button variant={view === "week" ? "secondary" : "ghost"} size="sm" onClick={() => setView("week")}>Semana</Button><Button variant={view === "day" ? "secondary" : "ghost"} size="sm" onClick={() => setView("day")}>Dia</Button><Button render={<Link href="/appointments/new" />} size="sm"><Plus /> Consulta</Button></div></div><div className={cn("grid", view === "month" ? "grid-cols-7" : view === "week" ? "grid-cols-7" : "grid-cols-1")}>{view === "month" && ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((name) => <p key={name} className="border-b p-2 text-center text-xs font-medium text-muted-foreground">{name}</p>)}{visibleDays.map((day) => { const key = dateKey(day); const entries = byDay[key] ?? []; return <div key={key} className={cn("min-h-32 border-b border-r p-2", day.getMonth() !== active.getMonth() && view === "month" && "bg-muted/30 text-muted-foreground", view !== "month" && "min-h-96")}><Link href={`/appointments?date=${key}`} className="mb-2 inline-flex size-6 items-center justify-center rounded-full text-xs font-medium hover:bg-muted">{day.getDate()}</Link><div className="space-y-1">{entries.map((item) => <Link key={item.id} href={`/appointments/${item.id}/edit`} className="block rounded px-1.5 py-1 text-xs hover:opacity-80"><span className={cn("mr-1 inline-block size-1.5 rounded-full", statusClass[item.status])} /><span className="font-medium">{formatTime(item.starts_at)}</span> {item.patient?.full_name}</Link>)}</div></div>; })}</div></section>;
+}
