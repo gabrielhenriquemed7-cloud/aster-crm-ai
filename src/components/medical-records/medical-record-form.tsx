@@ -16,6 +16,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { medicalRecordDefaultValues, medicalRecordSchema, type MedicalRecordFormValues } from "@/lib/medical-records/schema";
 import type { MedicalRecord, MedicalRecordAppointment, MedicalRecordHistoryItem } from "@/lib/medical-records/types";
 import { appointmentTypeLabels } from "@/lib/appointments/types";
+import { RecordDocuments } from "@/components/clinical-documents/record-documents";
 
 type FieldName = keyof MedicalRecordFormValues;
 
@@ -90,10 +91,11 @@ function TextAreaField({ form, name, label, placeholder, rows = 5, disabled }: {
   </section>;
 }
 
-export function MedicalRecordForm({ appointment, record, history, canEdit }: {
+export function MedicalRecordForm({ appointment, record, history, patientDocuments, canEdit }: {
   appointment: MedicalRecordAppointment;
   record: MedicalRecord | null;
   history: MedicalRecordHistoryItem[];
+  patientDocuments: Array<{ id: string; title: string; document_type: string; status: string; issued_at: string | null; created_at: string }>;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -206,13 +208,15 @@ export function MedicalRecordForm({ appointment, record, history, canEdit }: {
 
     {(patient?.allergies || patient?.continuous_medications) && <div className="grid gap-3 sm:grid-cols-2">{patient.allergies && <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4"><p className="text-xs font-semibold uppercase text-destructive">Alergias</p><p className="mt-1 whitespace-pre-wrap text-sm">{patient.allergies}</p></div>}{patient.continuous_medications && <div className="rounded-xl border bg-muted/30 p-4"><p className="text-xs font-semibold uppercase text-muted-foreground">Medicamentos em uso</p><p className="mt-1 whitespace-pre-wrap text-sm">{patient.continuous_medications}</p></div>}</div>}
 
+    <RecordDocuments appointmentId={appointment.id} canCreate={appointment.status === "in_progress" && appointment.professional_id === record?.professional_id} />
+
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
     <aside className="xl:sticky xl:top-6"><Card className="shadow-none">
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="flex items-center gap-2"><FileClock className="size-5 text-primary" /> Histórico longitudinal</CardTitle><p className="mt-1 text-sm text-muted-foreground">Consultas anteriores deste paciente, em modo somente leitura.</p></div>{history[0] && canEdit && <Dialog open={Boolean(importSource)} onOpenChange={(open) => { if (!open) { setImportSource(null); setSelectedFields([]); } }}><DialogTrigger asChild><Button type="button" variant="outline" onClick={() => setImportSource(history[0])}><Copy /> Importar dados anteriores</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Importar dados anteriores</DialogTitle><DialogDescription>Escolha a consulta de origem e apenas os campos que deseja copiar. A evolução completa não será importada.</DialogDescription></DialogHeader><label className="text-sm font-medium">Consulta de origem<select className="mt-2 w-full rounded-lg border bg-background px-3 py-2" value={importSource?.id ?? ""} onChange={(event) => setImportSource(history.find((item) => item.id === event.target.value) ?? null)}>{history.map((item) => <option key={item.id} value={item.id}>{new Date(`${item.appointment_date}T12:00:00`).toLocaleDateString("pt-BR")} · {item.title}</option>)}</select></label><div className="grid gap-2 sm:grid-cols-2">{importOptions.map((option) => <label key={option.name} className="flex items-center gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={selectedFields.includes(option.name)} disabled={!importSource?.[option.name]} onChange={(event) => setSelectedFields((current) => event.target.checked ? [...current, option.name] : current.filter((field) => field !== option.name))} />{option.label}</label>)}</div><DialogFooter><DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose><Button type="button" disabled={!selectedFields.length} onClick={importPrevious}>Importar selecionados</Button></DialogFooter></DialogContent></Dialog>}</CardHeader>
       <CardContent>{history.length ? <div className="space-y-3"><div className="rounded-xl border bg-muted/20 p-4"><p className="text-sm"><span className="text-muted-foreground">Última consulta:</span> <strong>{new Date(`${history[0].appointment_date}T12:00:00`).toLocaleDateString("pt-BR")}</strong> com {history[0].professional_name}</p><p className="mt-2 text-sm"><strong>Diagnóstico/CID:</strong> {history[0].assessment || "Não informado"}{history[0].cid10 ? ` · ${history[0].cid10}` : ""}</p><p className="mt-1 text-sm"><strong>Conduta:</strong> {history[0].plan || "Não informada"}</p></div><div className="space-y-3 border-l-2 pl-4">{history.map((item) => <Dialog key={item.id}><DialogTrigger asChild><button type="button" className="w-full rounded-xl border p-4 text-left transition-colors hover:bg-muted/40"><span className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{item.title}</span><Badge variant="outline"><CalendarClock className="size-3" /> {new Date(`${item.appointment_date}T12:00:00`).toLocaleDateString("pt-BR")}</Badge></span><span className="mt-2 block text-sm text-muted-foreground">{item.chief_complaint || "Sem queixa principal registrada"} · {item.professional_name}</span></button></DialogTrigger><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle>{item.title}</DialogTitle><DialogDescription>{new Date(`${item.appointment_date}T12:00:00`).toLocaleDateString("pt-BR")} às {item.start_time.slice(0, 5)} · {item.professional_name} · somente leitura</DialogDescription></DialogHeader><div className="grid gap-4 sm:grid-cols-2">{[
               ["Queixa principal", item.chief_complaint], ["HDA", item.hpi], ["Avaliação", item.assessment], ["CID", item.cid10], ["Conduta", item.plan], ["Prescrições", item.prescription], ["Solicitações de exames", item.exam_requests], ["Alergias", item.allergies], ["Medicamentos em uso", item.medications],
             ].map(([label, value]) => <div key={label} className="rounded-lg border p-3"><p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p><p className="mt-2 whitespace-pre-wrap text-sm">{value || "Não informado"}</p></div>)}</div></DialogContent></Dialog>)}</div></div> : <div className="py-8 text-center"><FileClock className="mx-auto size-7 text-muted-foreground" /><p className="mt-2 text-sm text-muted-foreground">Nenhuma consulta anterior com prontuário.</p></div>}</CardContent>
-    </Card></aside>
+    </Card>{patientDocuments.length > 0 && <Card className="mt-4 shadow-none"><CardHeader><CardTitle className="text-base">Documentos emitidos</CardTitle></CardHeader><CardContent className="space-y-2">{patientDocuments.map((document) => <Link key={document.id} href={`/documentos/${document.id}`} className="flex items-center justify-between rounded-lg border p-3 text-sm hover:bg-muted/30"><span>{document.title}</span><Badge variant={document.status === "cancelled" ? "destructive" : "outline"}>{document.issued_at ? new Date(document.issued_at).toLocaleDateString("pt-BR") : "Emitido"}</Badge></Link>)}</CardContent></Card>}</aside>
 
     <div className="space-y-6">
     <div className="grid gap-6 lg:grid-cols-2">

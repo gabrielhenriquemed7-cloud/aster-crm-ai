@@ -15,5 +15,5 @@ export default async function MedicalRecordPage({ params }: { params: Promise<{ 
       <p className="mt-1 text-sm text-muted-foreground">{data.error}</p>
     </div>;
   }
-  return <MedicalRecordForm appointment={data.appointment} record={data.record} history={data.history} canEdit={data.canEdit} />;
+  return <MedicalRecordForm appointment={data.appointment} record={data.record} history={data.history} patientDocuments={data.patientDocuments} canEdit={data.canEdit} />;
 }

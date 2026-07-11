@@ -96,12 +96,14 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     const source = appointmentMap.get(item.appointment_id); if (!source) return [];
     return [{ ...item, appointment_date: source.appointment_date, start_time: source.start_time, title: source.title, professional_name: professionalMap.get(source.professional_id) ?? "Profissional" } as MedicalRecordHistoryItem];
   }).sort((a, b) => `${b.appointment_date} ${b.start_time}`.localeCompare(`${a.appointment_date} ${a.start_time}`));
+  const { data: patientDocuments } = await current.supabase.from("clinical_documents").select("id, title, document_type, status, issued_at, created_at").eq("clinic_id", current.clinicId).eq("patient_id", appointment.patient_id).in("status", ["issued", "cancelled"]).is("deleted_at", null).order("created_at", { ascending: false });
 
   return {
     error: null,
     appointment: normalizedAppointment,
     record: (record as MedicalRecord | null) ?? null,
     history,
+    patientDocuments: patientDocuments ?? [],
     canEdit: appointment.professional_id === current.userId && appointment.status === "in_progress" && (!record || record.status === "draft"),
   };
 }
