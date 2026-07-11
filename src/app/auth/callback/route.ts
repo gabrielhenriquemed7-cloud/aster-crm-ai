@@ -12,7 +12,11 @@ export async function GET(request: NextRequest) {
     const supabase = await createClient();
     if (supabase) {
       const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (!error) return NextResponse.redirect(`${origin}${next}`);
+      if (!error) {
+        const { error: inviteError } = await supabase.rpc("accept_my_clinic_invites");
+        if (inviteError) return NextResponse.redirect(`${origin}${next}?error=invite_acceptance`);
+        return NextResponse.redirect(`${origin}${next}`);
+      }
     }
   }
   return NextResponse.redirect(`${origin}/login?error=auth_callback`);
