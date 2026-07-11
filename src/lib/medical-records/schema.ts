@@ -11,6 +11,7 @@ export const medicalRecordSchema = z.object({
   family_history: clinicalText,
   social_history: clinicalText,
   physical_exam: clinicalText,
+  vital_signs: clinicalText,
   assessment: clinicalText,
   cid10: z.string().trim().max(500, "CID-10 deve ter no máximo 500 caracteres.").optional(),
   plan: clinicalText,
@@ -18,6 +19,7 @@ export const medicalRecordSchema = z.object({
   exam_requests: clinicalText,
   certificate: clinicalText,
   return_guidance: clinicalText,
+  guidance: clinicalText,
 });
 
 export type MedicalRecordFormValues = z.infer<typeof medicalRecordSchema>;
@@ -31,6 +33,7 @@ export const medicalRecordDefaultValues: MedicalRecordFormValues = {
   family_history: "",
   social_history: "",
   physical_exam: "",
+  vital_signs: "",
   assessment: "",
   cid10: "",
   plan: "",
@@ -38,4 +41,5 @@ export const medicalRecordDefaultValues: MedicalRecordFormValues = {
   exam_requests: "",
   certificate: "",
   return_guidance: "",
+  guidance: "",
 };

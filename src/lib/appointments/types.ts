@@ -29,6 +29,10 @@ export interface Appointment {
   updated_at: string;
   cancelled_at: string | null;
   cancellation_reason: string | null;
+  arrived_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  completed_by: string | null;
   patient?: { full_name: string; phone: string | null } | null;
   professional?: { full_name: string | null } | null;
 }

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { appointmentSchema, type AppointmentFormValues } from "@/lib/appointments/schema";
@@ -28,6 +29,9 @@ function errorMessage(error: DbError | null, fallback: string) {
   if (message.includes("Paciente não pertence")) return "O paciente selecionado não pertence à clínica ativa.";
   if (message.includes("Profissional não pertence")) return "O profissional selecionado não pertence à clínica ativa.";
   if (message.includes("motivo do cancelamento")) return "Informe o motivo do cancelamento.";
+  if (message.includes("Somente o profissional responsável")) return message;
+  if (message.includes("precisa estar aguardando")) return message;
+  if (message.includes("Consulta não encontrada na clínica ativa")) return message;
   console.error("appointment database error", {
     message: error?.message ?? null,
     details: error?.details ?? null,
@@ -116,13 +120,26 @@ export async function updateAppointment(id: string, values: AppointmentFormValue
 
 export async function updateAppointmentStatus(id: string, status: AppointmentStatus, reason = ""): Promise<Result> {
   if (!idSchema.safeParse(id).success) return { error: "Consulta inválida." };
-  const allowed: AppointmentStatus[] = ["confirmed", "waiting", "in_progress", "completed", "cancelled", "no_show"];
+  const allowed: AppointmentStatus[] = ["confirmed", "waiting", "cancelled", "no_show"];
   if (!allowed.includes(status)) return { error: "Status inválido." };
   if (status === "cancelled" && !reason.trim()) return { error: "Informe o motivo do cancelamento." };
   const current = await context(); if (current.error) return { error: current.error };
-  const { error } = await current.supabase.from("appointments").update({ status, cancellation_reason: status === "cancelled" ? reason.trim() : null }).eq("id", id).eq("clinic_id", current.clinicId);
+  const { data: appointment } = await current.supabase.from("appointments").select("status").eq("id", id).eq("clinic_id", current.clinicId).maybeSingle();
+  if (!appointment) return { error: "Consulta não encontrada na clínica ativa." };
+  const transitions: Partial<Record<AppointmentStatus, AppointmentStatus[]>> = { scheduled: ["confirmed", "cancelled", "no_show"], confirmed: ["waiting", "cancelled", "no_show"] };
+  if (!transitions[appointment.status as AppointmentStatus]?.includes(status)) return { error: "Esta mudança de status não é permitida no fluxo clínico." };
+  const { error } = await current.supabase.from("appointments").update({ status, cancellation_reason: status === "cancelled" ? reason.trim() : null, arrived_at: status === "waiting" ? new Date().toISOString() : undefined }).eq("id", id).eq("clinic_id", current.clinicId);
   if (error) return { error: errorMessage(error, "Não foi possível atualizar o status da consulta.") };
   refresh(id); return { success: status === "cancelled" ? "Consulta cancelada." : "Status atualizado com sucesso.", id };
+}
+
+export async function startClinicalEncounter(id: string): Promise<{ error?: string }> {
+  if (!idSchema.safeParse(id).success) return { error: "Consulta inválida." };
+  const current = await context(); if (current.error) return { error: current.error };
+  const { error } = await current.supabase.rpc("start_clinical_encounter", { target_appointment_id: id });
+  if (error) return { error: errorMessage(error, "Não foi possível iniciar o atendimento.") };
+  refresh(id); revalidatePath(`/consultas/${id}/prontuario`);
+  redirect(`/consultas/${id}/prontuario`);
 }
 
 export async function getTodayAppointmentMetrics() {

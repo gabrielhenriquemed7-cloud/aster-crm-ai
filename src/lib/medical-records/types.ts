@@ -19,6 +19,12 @@ export interface MedicalRecord {
   exam_requests: string | null;
   certificate: string | null;
   return_guidance: string | null;
+  vital_signs: string | null;
+  guidance: string | null;
+  status: "draft" | "finalized" | "amended";
+  finalized_at: string | null;
+  finalized_by: string | null;
+  last_saved_at: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -36,7 +42,9 @@ export interface MedicalRecordAppointment {
   patient: {
     id: string;
     full_name: string;
+    social_name: string | null;
     birth_date: string | null;
+    gender: string | null;
     cpf: string | null;
     phone: string | null;
     insurance: string | null;
@@ -45,6 +53,7 @@ export interface MedicalRecordAppointment {
     medical_history: string | null;
   } | null;
   professional: { full_name: string | null } | null;
+  appointment_type: import("@/lib/appointments/types").AppointmentType;
 }
 
 export interface MedicalRecordHistoryItem extends MedicalRecord {

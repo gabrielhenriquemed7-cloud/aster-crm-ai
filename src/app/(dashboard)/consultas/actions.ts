@@ -50,7 +50,7 @@ export async function getMedicalRecordPageData(appointmentId: string) {
 
   const { data: appointment, error: appointmentError } = await current.supabase
     .from("appointments")
-    .select("id, clinic_id, patient_id, professional_id, title, appointment_date, start_time, status, patient:patients(id, full_name, birth_date, cpf, phone, insurance, allergies, continuous_medications, medical_history)")
+    .select("id, clinic_id, patient_id, professional_id, title, appointment_date, start_time, appointment_type, status, patient:patients(id, full_name, social_name, birth_date, gender, cpf, phone, insurance, allergies, continuous_medications, medical_history)")
     .eq("id", appointmentId)
     .eq("clinic_id", current.clinicId)
     .maybeSingle();
@@ -102,7 +102,7 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     appointment: normalizedAppointment,
     record: (record as MedicalRecord | null) ?? null,
     history,
-    canEdit: appointment.professional_id === current.userId,
+    canEdit: appointment.professional_id === current.userId && appointment.status === "in_progress" && (!record || record.status === "draft"),
   };
 }
 
@@ -115,20 +115,22 @@ export async function saveMedicalRecord(appointmentId: string, values: MedicalRe
 
   const { data: appointment } = await current.supabase
     .from("appointments")
-    .select("id, professional_id")
+    .select("id, professional_id, status")
     .eq("id", appointmentId)
     .eq("clinic_id", current.clinicId)
     .maybeSingle();
   if (!appointment) return { error: "Consulta não encontrada na clínica ativa." };
   if (appointment.professional_id !== current.userId) return { error: "Somente o profissional da consulta pode salvar o prontuário." };
+  if (appointment.status !== "in_progress") return { error: "O prontuário só pode ser editado durante o atendimento." };
 
   const { data: existing, error: lookupError } = await current.supabase
     .from("medical_records")
-    .select("id")
+    .select("id, status")
     .eq("appointment_id", appointmentId)
     .is("deleted_at", null)
     .maybeSingle();
   if (lookupError) return { error: "Não foi possível verificar o prontuário da consulta." };
+  if (existing && existing.status !== "draft") return { error: "Este prontuário foi finalizado e está disponível apenas para leitura." };
 
   const payload = recordPayload(parsed.data);
   const result = existing
@@ -149,4 +151,17 @@ export async function saveMedicalRecord(appointmentId: string, values: MedicalRe
   revalidatePath(`/consultas/${appointmentId}`);
   revalidatePath(`/appointments/${appointmentId}`);
   return { success: "Prontuário salvo com sucesso.", id: result.data.id };
+}
+
+export async function finalizeClinicalEncounter(appointmentId: string): Promise<SaveResult> {
+  if (!idSchema.safeParse(appointmentId).success) return { error: "Consulta inválida." };
+  const current = await context(); if (current.error) return { error: current.error };
+  const { data, error } = await current.supabase.rpc("finalize_clinical_encounter", { target_appointment_id: appointmentId });
+  if (error) {
+    const known = error.message.includes("Preencha motivo") || error.message.includes("Salve o prontuário") || error.message.includes("Somente o profissional") || error.message.includes("precisa estar em atendimento");
+    if (!known) console.error("medical record finalize failed", { message: error.message, details: error.details, hint: error.hint, code: error.code });
+    return { error: known ? error.message : "Não foi possível finalizar o atendimento." };
+  }
+  revalidatePath(`/consultas/${appointmentId}/prontuario`); revalidatePath(`/appointments/${appointmentId}`); revalidatePath("/appointments"); revalidatePath("/dashboard");
+  return { success: "Consulta finalizada. O prontuário agora está somente para leitura.", id: data as string };
 }

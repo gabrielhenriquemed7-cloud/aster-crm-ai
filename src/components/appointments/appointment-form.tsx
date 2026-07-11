@@ -17,15 +17,14 @@ import { appointmentStatusLabels, appointmentTypeLabels, type Appointment, type 
 function today() { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bahia" }).format(new Date()); }
 function addMinutes(time: string, minutes: number) { const [hours, mins] = time.split(":").map(Number); const total = hours * 60 + mins + minutes; return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`; }
 
-export function AppointmentForm({ appointment, patients, professionals, currentUserId, initialDate }: { appointment?: Appointment; patients: { id: string; full_name: string }[]; professionals: Professional[]; currentUserId: string; initialDate?: string }) {
+export function AppointmentForm({ appointment, patients, professionals, currentUserId, initialDate, initialPatientId, initialProfessionalId, initialType }: { appointment?: Appointment; patients: { id: string; full_name: string }[]; professionals: Professional[]; currentUserId: string; initialDate?: string; initialPatientId?: string; initialProfessionalId?: string; initialType?: "return" }) {
   const router = useRouter(); const [saving, setSaving] = useState(false);
   const form = useForm<AppointmentFormValues>({ resolver: zodResolver(appointmentSchema), defaultValues: {
-    patient_id: appointment?.patient_id ?? "", professional_id: appointment?.professional_id ?? (professionals.some((item) => item.id === currentUserId) ? currentUserId : ""),
+    patient_id: appointment?.patient_id ?? (patients.some((item) => item.id === initialPatientId) ? initialPatientId! : ""), professional_id: appointment?.professional_id ?? (professionals.some((item) => item.id === initialProfessionalId) ? initialProfessionalId! : professionals.some((item) => item.id === currentUserId) ? currentUserId : ""),
     title: appointment?.title ?? "Consulta", appointment_date: appointment?.appointment_date ?? initialDate ?? today(), start_time: appointment?.start_time?.slice(0, 5) ?? "08:00",
-    end_time: appointment?.end_time?.slice(0, 5) ?? "08:30", appointment_type: appointment?.appointment_type ?? "consultation", status: appointment?.status ?? "scheduled",
+    end_time: appointment?.end_time?.slice(0, 5) ?? "08:30", appointment_type: appointment?.appointment_type ?? initialType ?? "consultation", status: appointment?.status ?? "scheduled",
     notes: appointment?.notes ?? "", cancellation_reason: appointment?.cancellation_reason ?? "",
   } });
-  const status = useWatch({ control: form.control, name: "status" });
   const startTime = useWatch({ control: form.control, name: "start_time" });
   function setDuration(minutes: number) { if (startTime) form.setValue("end_time", addMinutes(startTime, minutes), { shouldValidate: true }); }
   async function submit(values: AppointmentFormValues) { setSaving(true); const result = appointment ? await updateAppointment(appointment.id, values) : await createAppointment(values); setSaving(false); if (result.error) return toast.error(result.error); toast.success(result.success); router.push(`/appointments/${result.id}`); router.refresh(); }
@@ -41,8 +40,7 @@ export function AppointmentForm({ appointment, patients, professionals, currentU
       <div><label className="mb-1.5 block text-sm font-medium">Início *</label><Input type="time" {...form.register("start_time")} /><p className="mt-1 text-xs text-destructive">{form.formState.errors.start_time?.message}</p></div>
       <div><label className="mb-1.5 block text-sm font-medium">Término *</label><Input type="time" {...form.register("end_time")} /><p className="mt-1 text-xs text-destructive">{form.formState.errors.end_time?.message}</p></div>
       <div><label className="mb-1.5 block text-sm font-medium">Tipo</label><select className="h-9 w-full rounded-md border bg-background px-3 text-sm" {...form.register("appointment_type")}>{Object.entries(appointmentTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
-      <div><label className="mb-1.5 block text-sm font-medium">Status</label><select className="h-9 w-full rounded-md border bg-background px-3 text-sm" {...form.register("status")}>{Object.entries(appointmentStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
-      {status === "cancelled" && <div className="md:col-span-2"><label className="mb-1.5 block text-sm font-medium">Motivo do cancelamento *</label><textarea className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm" {...form.register("cancellation_reason")} /><p className="mt-1 text-xs text-destructive">{form.formState.errors.cancellation_reason?.message}</p></div>}
+      <div><label className="mb-1.5 block text-sm font-medium">Status</label><p className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm">{appointmentStatusLabels[form.getValues("status")]}</p><input type="hidden" {...form.register("status")} /></div>
       <div className="md:col-span-2"><label className="mb-1.5 block text-sm font-medium">Observações</label><textarea className="min-h-28 w-full rounded-md border bg-background px-3 py-2 text-sm" {...form.register("notes")} /></div>
     </section>
   </form>;
