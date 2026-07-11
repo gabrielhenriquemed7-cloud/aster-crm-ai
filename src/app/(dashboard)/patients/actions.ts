@@ -8,6 +8,29 @@ import { createClient } from "@/lib/supabase/server";
 
 type ActionResult = { error?: string; id?: string; success?: string };
 
+type SupabaseError = {
+  code?: string;
+  message?: string;
+  details?: string | null;
+  hint?: string | null;
+};
+
+function databaseError(action: string, error: SupabaseError) {
+  console.error(`patient ${action} failed`, {
+    code: error.code,
+    message: error.message,
+    details: error.details,
+    hint: error.hint,
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    const detail = [error.code, error.message, error.details, error.hint].filter(Boolean).join(" · ");
+    return `${action}: ${detail || "Erro desconhecido do Supabase."}`;
+  }
+
+  return `Não foi possível ${action.toLocaleLowerCase()}.`;
+}
+
 function nullable(value: string | undefined) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
@@ -16,14 +39,24 @@ function nullable(value: string | undefined) {
 function toPatientInput(values: PatientFormValues): PatientInput {
   return {
     full_name: values.full_name.trim(),
+    social_name: nullable(values.social_name),
     cpf: nullable(values.cpf)?.replace(/\D/g, "") ?? null,
+    rg: nullable(values.rg),
     cns: nullable(values.cns) ?? null,
     birth_date: nullable(values.birth_date) ?? null,
     gender: nullable(values.gender) ?? null,
+    race_ethnicity: nullable(values.race_ethnicity),
     marital_status: nullable(values.marital_status) ?? null,
+    nationality: nullable(values.nationality),
+    birthplace: nullable(values.birthplace),
+    mother_name: nullable(values.mother_name),
+    father_name: nullable(values.father_name),
     occupation: nullable(values.occupation) ?? null,
-    zip_code: nullable(values.zip_code) ?? null,
+    zip_code: nullable(values.zip_code)?.replace(/\D/g, "") ?? null,
     address: nullable(values.address) ?? null,
+    address_number: nullable(values.address_number),
+    address_complement: nullable(values.address_complement),
+    neighborhood: nullable(values.neighborhood),
     city: nullable(values.city) ?? null,
     state: nullable(values.state)?.toUpperCase() ?? null,
     phone: nullable(values.phone) ?? null,
@@ -31,9 +64,14 @@ function toPatientInput(values: PatientFormValues): PatientInput {
     email: nullable(values.email)?.toLowerCase() ?? null,
     insurance: nullable(values.insurance) ?? null,
     insurance_card: nullable(values.insurance_card) ?? null,
-    emergency_contact: nullable(values.emergency_contact) ?? null,
+    emergency_contact_name: nullable(values.emergency_contact_name),
+    emergency_contact_phone: nullable(values.emergency_contact_phone),
+    emergency_contact_relationship: nullable(values.emergency_contact_relationship),
+    blood_type: nullable(values.blood_type),
     allergies: nullable(values.allergies) ?? null,
     comorbidities: nullable(values.comorbidities) ?? null,
+    continuous_medications: nullable(values.continuous_medications),
+    medical_history: nullable(values.medical_history),
     notes: nullable(values.notes) ?? null,
   };
 }
@@ -65,13 +103,23 @@ export async function createPatient(values: PatientFormValues, photo?: File): Pr
   if (!authData.user) return { error: "Faça login para cadastrar pacientes." };
   const { data: profile } = await supabase.from("profiles").select("active_clinic_id").eq("id", authData.user.id).maybeSingle();
   if (!profile?.active_clinic_id) return { error: "Selecione ou crie uma clínica antes de cadastrar pacientes." };
+  const { data: membership, error: membershipError } = await supabase
+    .from("clinic_members")
+    .select("id")
+    .eq("user_id", authData.user.id)
+    .eq("clinic_id", profile.active_clinic_id)
+    .eq("status", "active")
+    .maybeSingle();
+  if (membershipError) return { error: databaseError("Validar acesso à clínica", membershipError) };
+  if (!membership) return { error: "Seu usuário não possui vínculo ativo com a clínica selecionada." };
 
   const { data, error } = await supabase
     .from("patients")
     .insert({ ...toPatientInput(parsed.data), user_id: authData.user.id, clinic_id: profile.active_clinic_id })
     .select("id")
     .single();
-  if (error || !data) return { error: "Não foi possível cadastrar o paciente." };
+  if (error) return { error: databaseError("Cadastrar paciente", error) };
+  if (!data) return { error: "Não foi possível cadastrar o paciente: o Supabase não retornou o registro criado." };
 
   if (photo?.size) {
     const result = await uploadPhoto(data.id, photo);
@@ -90,7 +138,7 @@ export async function updatePatient(id: string, values: PatientFormValues, photo
   if (!supabase) return { error: "Configure o Supabase para editar pacientes." };
 
   const { error } = await supabase.from("patients").update(toPatientInput(parsed.data)).eq("id", id);
-  if (error) return { error: "Não foi possível salvar as alterações." };
+  if (error) return { error: databaseError("Salvar alterações do paciente", error) };
   if (photo?.size) {
     const result = await uploadPhoto(id, photo);
     if (result.error) return { error: result.error };
@@ -105,8 +153,10 @@ export async function updatePatient(id: string, values: PatientFormValues, photo
 export async function deletePatient(id: string): Promise<ActionResult> {
   const supabase = await createClient();
   if (!supabase) return { error: "Configure o Supabase para excluir pacientes." };
-  const { error } = await supabase.from("patients").delete().eq("id", id);
-  if (error) return { error: "Não foi possível excluir o paciente." };
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData.user) return { error: "Faça login para excluir pacientes." };
+  const { error } = await supabase.from("patients").update({ deleted_at: new Date().toISOString(), deleted_by: authData.user.id }).eq("id", id).is("deleted_at", null);
+  if (error) return { error: databaseError("Excluir paciente", error) };
   revalidatePath("/patients");
   return { success: "Paciente excluído com sucesso." };
 }
@@ -114,7 +164,7 @@ export async function deletePatient(id: string): Promise<ActionResult> {
 export async function getPatient(id: string): Promise<Patient | null> {
   const supabase = await createClient();
   if (!supabase) return null;
-  const { data } = await supabase.from("patients").select("*").eq("id", id).maybeSingle();
+  const { data } = await supabase.from("patients").select("*").eq("id", id).is("deleted_at", null).maybeSingle();
   return data as Patient | null;
 }
 
@@ -123,10 +173,11 @@ export async function listPatients({ page = 1, search = "", gender = "", insuran
   const pageSize = 10;
   if (!supabase) return { patients: [] as Patient[], total: 0, pageSize };
 
-  let query = supabase.from("patients").select("*", { count: "exact" }).order("full_name").range((page - 1) * pageSize, page * pageSize - 1);
+  let query = supabase.from("patients").select("*", { count: "exact" }).is("deleted_at", null).order("full_name").range((page - 1) * pageSize, page * pageSize - 1);
   if (search.trim()) {
-    const term = search.trim().replace(/[,()]/g, "");
-    query = query.or(`full_name.ilike.%${term}%,cpf.ilike.%${term}%,email.ilike.%${term}%`);
+    const term = search.trim().replace(/[%_,()]/g, "");
+    const cpf = term.replace(/\D/g, "");
+    query = query.or(`full_name.ilike.%${term}%,social_name.ilike.%${term}%,cpf.ilike.%${cpf || term}%`);
   }
   if (gender) query = query.eq("gender", gender);
   if (insurance) query = query.ilike("insurance", `%${insurance}%`);

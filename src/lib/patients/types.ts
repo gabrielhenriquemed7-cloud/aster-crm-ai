@@ -1,14 +1,27 @@
 export interface Patient {
   id: string;
+  clinic_id: string;
+  user_id: string;
+  created_by: string;
   full_name: string;
+  social_name: string | null;
   cpf: string | null;
+  rg: string | null;
   cns: string | null;
   birth_date: string | null;
   gender: string | null;
+  race_ethnicity: string | null;
   marital_status: string | null;
+  nationality: string | null;
+  birthplace: string | null;
+  mother_name: string | null;
+  father_name: string | null;
   occupation: string | null;
   zip_code: string | null;
   address: string | null;
+  address_number: string | null;
+  address_complement: string | null;
+  neighborhood: string | null;
   city: string | null;
   state: string | null;
   phone: string | null;
@@ -16,13 +29,20 @@ export interface Patient {
   email: string | null;
   insurance: string | null;
   insurance_card: string | null;
-  emergency_contact: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  emergency_contact_relationship: string | null;
+  blood_type: string | null;
   allergies: string | null;
   comorbidities: string | null;
+  continuous_medications: string | null;
+  medical_history: string | null;
   notes: string | null;
   photo_url: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
 }
 
-export type PatientInput = Omit<Patient, "id" | "created_at" | "updated_at" | "photo_url">;
+export type PatientInput = Omit<Patient, "id" | "clinic_id" | "user_id" | "created_by" | "created_at" | "updated_at" | "photo_url" | "deleted_at" | "deleted_by">;
