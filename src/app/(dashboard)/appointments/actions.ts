@@ -1,26 +1,124 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
+
 import { appointmentSchema, type AppointmentFormValues } from "@/lib/appointments/schema";
-import type { Appointment, Doctor } from "@/lib/appointments/types";
+import type { Appointment, AppointmentStatus, Professional } from "@/lib/appointments/types";
 import type { Patient } from "@/lib/patients/types";
 import { createClient } from "@/lib/supabase/server";
 
 type Result = { error?: string; id?: string; success?: string };
-function refresh() { revalidatePath("/appointments"); revalidatePath("/"); revalidatePath("/dashboard"); }
+type DbError = { code?: string; message?: string; details?: string | null };
+const idSchema = z.string().uuid("Consulta inválida.");
 
-export async function listAppointments({ from, to, search = "", doctorId = "" }: { from: string; to: string; search?: string; doctorId?: string }) {
-  const supabase = await createClient(); if (!supabase) return [] as Appointment[];
-  let query = supabase.from("appointments").select("*, patient:patients(full_name, phone)").gte("starts_at", from).lt("starts_at", to).order("starts_at");
-  if (doctorId) query = query.eq("doctor_id", doctorId);
-  const { data } = await query;
-  const appointments = (data ?? []) as Appointment[];
-  if (!search.trim()) return appointments;
-  const term = search.toLocaleLowerCase(); return appointments.filter((item) => item.patient?.full_name.toLocaleLowerCase().includes(term));
+function refresh(id?: string) {
+  revalidatePath("/appointments"); revalidatePath("/dashboard");
+  if (id) revalidatePath(`/appointments/${id}`);
 }
-export async function getAppointment(id: string) { const supabase = await createClient(); if (!supabase) return null; const { data } = await supabase.from("appointments").select("*, patient:patients(full_name, phone)").eq("id", id).maybeSingle(); return data as Appointment | null; }
-export async function getAppointmentFormData() { const supabase = await createClient(); if (!supabase) return { patients: [] as Pick<Patient, "id" | "full_name">[], doctors: [] as Doctor[], currentUserId: "" }; const [{ data: patients }, { data: profile }, { data: auth }] = await Promise.all([supabase.from("patients").select("id, full_name").is("deleted_at", null).order("full_name"), supabase.from("profiles").select("id, full_name, role").in("role", ["administrator", "doctor"]), supabase.auth.getUser()]); return { patients: (patients ?? []) as Pick<Patient, "id" | "full_name">[], doctors: (profile ?? []) as Doctor[], currentUserId: auth.user?.id ?? "" }; }
-export async function createAppointment(values: AppointmentFormValues): Promise<Result> { const parsed = appointmentSchema.safeParse(values); if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." }; const supabase = await createClient(); if (!supabase) return { error: "Configure o Supabase para criar consultas." }; const { data: auth } = await supabase.auth.getUser(); if (!auth.user) return { error: "Faça login para agendar." }; const { data: profile } = await supabase.from("profiles").select("active_clinic_id").eq("id", auth.user.id).maybeSingle(); if (!profile?.active_clinic_id) return { error: "Selecione ou crie uma clínica antes de agendar." }; const { data, error } = await supabase.from("appointments").insert({ ...parsed.data, notes: parsed.data.notes || null, cancellation_reason: parsed.data.cancellation_reason || null, user_id: auth.user.id, clinic_id: profile.active_clinic_id }).select("id").single(); if (error || !data) return { error: "Não foi possível agendar a consulta." }; refresh(); return { success: "Consulta agendada com sucesso.", id: data.id }; }
-export async function updateAppointment(id: string, values: AppointmentFormValues): Promise<Result> { const parsed = appointmentSchema.safeParse(values); if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." }; const supabase = await createClient(); if (!supabase) return { error: "Configure o Supabase para editar consultas." }; const { error } = await supabase.from("appointments").update({ ...parsed.data, notes: parsed.data.notes || null, cancellation_reason: parsed.data.cancellation_reason || null }).eq("id", id); if (error) return { error: "Não foi possível atualizar a consulta." }; refresh(); return { success: "Consulta atualizada com sucesso.", id }; }
-export async function cancelAppointment(id: string, reason = ""): Promise<Result> { const supabase = await createClient(); if (!supabase) return { error: "Configure o Supabase para cancelar consultas." }; const { error } = await supabase.from("appointments").update({ status: "cancelled", cancellation_reason: reason || null }).eq("id", id); if (error) return { error: "Não foi possível cancelar a consulta." }; refresh(); return { success: "Consulta cancelada." }; }
-export async function deleteAppointment(id: string): Promise<Result> { const supabase = await createClient(); if (!supabase) return { error: "Configure o Supabase para excluir consultas." }; const { error } = await supabase.from("appointments").delete().eq("id", id); if (error) return { error: "Não foi possível excluir a consulta." }; refresh(); return { success: "Consulta excluída." }; }
+
+function errorMessage(error: DbError | null, fallback: string) {
+  const message = error?.message ?? "";
+  if (message.includes("Conflito de horário")) return "Conflito de horário: o profissional já possui uma consulta neste período.";
+  if (message.includes("Paciente não pertence")) return "O paciente selecionado não pertence à clínica ativa.";
+  if (message.includes("Profissional não pertence")) return "O profissional selecionado não pertence à clínica ativa.";
+  if (message.includes("motivo do cancelamento")) return "Informe o motivo do cancelamento.";
+  console.error("appointment database error", { code: error?.code, message: error?.message, details: error?.details });
+  return fallback;
+}
+
+async function context() {
+  const supabase = await createClient();
+  if (!supabase) return { error: "Supabase não configurado." as const };
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return { error: "Sua sessão expirou. Entre novamente." as const };
+  const { data: profile } = await supabase.from("profiles").select("active_clinic_id").eq("id", auth.user.id).maybeSingle();
+  if (!profile?.active_clinic_id) return { error: "Selecione uma clínica ativa." as const };
+  const { data: member } = await supabase.from("clinic_members").select("id").eq("clinic_id", profile.active_clinic_id).eq("user_id", auth.user.id).eq("status", "active").maybeSingle();
+  if (!member) return { error: "Seu usuário não possui vínculo ativo com a clínica selecionada." as const };
+  return { supabase, userId: auth.user.id, clinicId: profile.active_clinic_id, error: null };
+}
+
+async function addProfessionalNames(appointments: Appointment[], supabase: NonNullable<Awaited<ReturnType<typeof createClient>>>) {
+  const ids = [...new Set(appointments.map((item) => item.professional_id))];
+  if (!ids.length) return appointments;
+  const { data } = await supabase.from("profiles").select("id, full_name").in("id", ids);
+  const names = new Map((data ?? []).map((profile) => [profile.id, profile.full_name]));
+  return appointments.map((item) => ({ ...item, professional: { full_name: names.get(item.professional_id) ?? "Profissional" } }));
+}
+
+export async function listAppointments({ from, to, search = "", professionalId = "", status = "" }: { from: string; to: string; search?: string; professionalId?: string; status?: string }) {
+  const current = await context();
+  if (current.error) return { appointments: [] as Appointment[], error: current.error };
+  let query = current.supabase.from("appointments").select("*, patient:patients(full_name, phone)").eq("clinic_id", current.clinicId).gte("appointment_date", from).lte("appointment_date", to).order("appointment_date").order("start_time");
+  if (professionalId) query = query.eq("professional_id", professionalId);
+  if (status) query = query.eq("status", status);
+  const { data, error } = await query;
+  if (error) return { appointments: [] as Appointment[], error: errorMessage(error, "Não foi possível carregar a agenda.") };
+  let appointments = (data ?? []) as Appointment[];
+  if (search.trim()) appointments = appointments.filter((item) => item.patient?.full_name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+  return { appointments: await addProfessionalNames(appointments, current.supabase), error: null };
+}
+
+export async function getAppointment(id: string) {
+  if (!idSchema.safeParse(id).success) return null;
+  const current = await context(); if (current.error) return null;
+  const { data } = await current.supabase.from("appointments").select("*, patient:patients(full_name, phone)").eq("id", id).eq("clinic_id", current.clinicId).maybeSingle();
+  if (!data) return null;
+  return (await addProfessionalNames([data as Appointment], current.supabase))[0] ?? null;
+}
+
+export async function getAppointmentFormData() {
+  const current = await context();
+  if (current.error) return { patients: [] as Pick<Patient, "id" | "full_name">[], professionals: [] as Professional[], currentUserId: "", error: current.error };
+  const [{ data: patients }, { data: members }] = await Promise.all([
+    current.supabase.from("patients").select("id, full_name").eq("clinic_id", current.clinicId).is("deleted_at", null).order("full_name"),
+    current.supabase.from("clinic_members").select("user_id, role").eq("clinic_id", current.clinicId).eq("status", "active").in("role", ["clinic_admin", "doctor"]),
+  ]);
+  const memberIds = (members ?? []).map((member) => member.user_id);
+  const { data: profiles } = memberIds.length ? await current.supabase.from("profiles").select("id, full_name").in("id", memberIds) : { data: [] };
+  const profileNames = new Map((profiles ?? []).map((profile) => [profile.id, profile.full_name]));
+  const professionals = (members ?? []).map((member) => ({ id: member.user_id, role: member.role, full_name: profileNames.get(member.user_id) ?? "Profissional" }));
+  return { patients: (patients ?? []) as Pick<Patient, "id" | "full_name">[], professionals, currentUserId: current.userId, error: null };
+}
+
+async function saveAppointment(id: string | null, values: AppointmentFormValues): Promise<Result> {
+  const parsed = appointmentSchema.safeParse(values);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  const current = await context(); if (current.error) return { error: current.error };
+  const payload = { ...parsed.data, notes: parsed.data.notes || null, cancellation_reason: parsed.data.cancellation_reason || null };
+  const conflictQuery = current.supabase.from("appointments").select("id").eq("clinic_id", current.clinicId).eq("professional_id", payload.professional_id).eq("appointment_date", payload.appointment_date).not("status", "in", "(cancelled,no_show)").lt("start_time", payload.end_time).gt("end_time", payload.start_time);
+  const { data: conflicts, error: conflictError } = id ? await conflictQuery.neq("id", id).limit(1) : await conflictQuery.limit(1);
+  if (conflictError) return { error: errorMessage(conflictError, "Não foi possível validar o horário.") };
+  if (conflicts?.length) return { error: "Conflito de horário: o profissional já possui uma consulta neste período." };
+  if (id) {
+    const { error } = await current.supabase.from("appointments").update(payload).eq("id", id).eq("clinic_id", current.clinicId);
+    if (error) return { error: errorMessage(error, "Não foi possível atualizar a consulta.") };
+    refresh(id); return { success: "Consulta atualizada com sucesso.", id };
+  }
+  const { data, error } = await current.supabase.from("appointments").insert(payload).select("id").single();
+  if (error || !data) return { error: errorMessage(error, "Não foi possível agendar a consulta.") };
+  refresh(data.id); return { success: "Consulta agendada com sucesso.", id: data.id };
+}
+
+export async function createAppointment(values: AppointmentFormValues) { return saveAppointment(null, values); }
+export async function updateAppointment(id: string, values: AppointmentFormValues) { if (!idSchema.safeParse(id).success) return { error: "Consulta inválida." }; return saveAppointment(id, values); }
+
+export async function updateAppointmentStatus(id: string, status: AppointmentStatus, reason = ""): Promise<Result> {
+  if (!idSchema.safeParse(id).success) return { error: "Consulta inválida." };
+  const allowed: AppointmentStatus[] = ["confirmed", "waiting", "in_progress", "completed", "cancelled", "no_show"];
+  if (!allowed.includes(status)) return { error: "Status inválido." };
+  if (status === "cancelled" && !reason.trim()) return { error: "Informe o motivo do cancelamento." };
+  const current = await context(); if (current.error) return { error: current.error };
+  const { error } = await current.supabase.from("appointments").update({ status, cancellation_reason: status === "cancelled" ? reason.trim() : null }).eq("id", id).eq("clinic_id", current.clinicId);
+  if (error) return { error: errorMessage(error, "Não foi possível atualizar o status da consulta.") };
+  refresh(id); return { success: status === "cancelled" ? "Consulta cancelada." : "Status atualizado com sucesso.", id };
+}
+
+export async function getTodayAppointmentMetrics() {
+  const current = await context(); if (current.error) return { total: 0, awaitingConfirmation: 0, error: current.error };
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bahia" }).format(new Date());
+  const { data, error } = await current.supabase.from("appointments").select("status").eq("clinic_id", current.clinicId).eq("appointment_date", today).neq("status", "cancelled");
+  if (error) return { total: 0, awaitingConfirmation: 0, error: "Não foi possível carregar os indicadores da agenda." };
+  return { total: data?.length ?? 0, awaitingConfirmation: data?.filter((item) => item.status === "scheduled").length ?? 0, error: null };
+}

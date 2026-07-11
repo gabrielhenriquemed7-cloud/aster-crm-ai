@@ -1,3 +1,3 @@
 import { getAppointmentFormData } from "@/app/(dashboard)/appointments/actions";
 import { AppointmentForm } from "@/components/appointments/appointment-form";
-export default async function NewAppointmentPage() { const data = await getAppointmentFormData(); return <AppointmentForm {...data} />; }
+export default async function NewAppointmentPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) { const [data, params] = await Promise.all([getAppointmentFormData(), searchParams]); return <AppointmentForm {...data} initialDate={/^\d{4}-\d{2}-\d{2}$/.test(params.date ?? "") ? params.date : undefined} />; }

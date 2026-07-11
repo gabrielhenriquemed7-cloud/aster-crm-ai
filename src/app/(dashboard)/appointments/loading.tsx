@@ -1,0 +1,1 @@
+export default function AppointmentsLoading() { return <div className="animate-pulse space-y-6"><div className="h-10 w-64 rounded bg-muted" /><div className="h-10 rounded bg-muted" /><div className="grid gap-6 xl:grid-cols-[1fr_360px]"><div className="h-[620px] rounded-xl bg-muted" /><div className="h-[420px] rounded-xl bg-muted" /></div></div>; }

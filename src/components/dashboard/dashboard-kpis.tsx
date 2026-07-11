@@ -3,15 +3,10 @@ import { CalendarDays, CircleDollarSign, ClipboardList, UserPlus } from "lucide-
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { getTodayAppointmentMetrics } from "@/app/(dashboard)/appointments/actions";
 
-const metrics = [
-  {
-    label: "Consultas hoje",
-    value: "12",
-    description: "3 aguardando confirmação",
-    icon: CalendarDays,
-    badge: { label: "+14%", variant: "secondary" as const },
-  },
+const staticMetrics = [
   {
     label: "Receita do mês",
     value: "R$ 84.250",
@@ -35,7 +30,9 @@ const metrics = [
   },
 ];
 
-export function DashboardKPIs() {
+export async function DashboardKPIs() {
+  const today = await getTodayAppointmentMetrics();
+  const metrics = [{ label: "Consultas hoje", value: String(today.total), description: `${today.awaitingConfirmation} aguardando confirmação`, icon: CalendarDays, badge: { label: "Abrir agenda", variant: "secondary" as const }, href: "/appointments?view=day" }, ...staticMetrics];
   return (
     <section className="space-y-4">
       <div className="flex flex-col gap-4 rounded-[2rem] border border-border bg-surface p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -53,9 +50,7 @@ export function DashboardKPIs() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => (
           <MetricCard key={metric.label} {...metric}>
-            <Badge variant={metric.badge.variant} className="mt-4">
-              {metric.badge.label}
-            </Badge>
+            {"href" in metric && metric.href ? <Badge asChild variant={metric.badge.variant} className="mt-4"><Link href={metric.href}>{metric.badge.label}</Link></Badge> : <Badge variant={metric.badge.variant} className="mt-4">{metric.badge.label}</Badge>}
           </MetricCard>
         ))}
       </div>
