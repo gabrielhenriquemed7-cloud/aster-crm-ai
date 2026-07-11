@@ -9,7 +9,12 @@ import type { Patient } from "@/lib/patients/types";
 import { createClient } from "@/lib/supabase/server";
 
 type Result = { error?: string; id?: string; success?: string };
-type DbError = { code?: string; message?: string; details?: string | null };
+type DbError = {
+  code?: string;
+  message?: string;
+  details?: string | null;
+  hint?: string | null;
+};
 const idSchema = z.string().uuid("Consulta inválida.");
 
 function refresh(id?: string) {
@@ -23,7 +28,12 @@ function errorMessage(error: DbError | null, fallback: string) {
   if (message.includes("Paciente não pertence")) return "O paciente selecionado não pertence à clínica ativa.";
   if (message.includes("Profissional não pertence")) return "O profissional selecionado não pertence à clínica ativa.";
   if (message.includes("motivo do cancelamento")) return "Informe o motivo do cancelamento.";
-  console.error("appointment database error", { code: error?.code, message: error?.message, details: error?.details });
+  console.error("appointment database error", {
+    message: error?.message ?? null,
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+    code: error?.code ?? null,
+  });
   return fallback;
 }
 
