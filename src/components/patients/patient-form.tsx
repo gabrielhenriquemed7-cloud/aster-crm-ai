@@ -118,8 +118,8 @@ export function PatientForm({ patient }: { patient?: Patient }) {
     setIsSubmitting(true);
     const result = patient ? await updatePatient(patient.id, values, photo) : await createPatient(values, photo);
     setIsSubmitting(false);
-    if (result.error) return toast.error(result.error);
-    toast.success(result.success);
+    if (result.error) return toast.error(`${result.code ?? "SEM_CODIGO"}: ${result.error}`);
+    toast.success(result.success || "Operação concluída com sucesso.");
     router.push(`/patients/${result.id}`);
     router.refresh();
   }

@@ -6,7 +6,14 @@ import { patientSchema, type PatientFormValues } from "@/lib/patients/schema";
 import type { Patient, PatientInput } from "@/lib/patients/types";
 import { createClient } from "@/lib/supabase/server";
 
-type ActionResult = { error?: string; id?: string; success?: string };
+type ActionResult = {
+  error?: string;
+  id?: string;
+  success?: string | false;
+  details?: string | null;
+  hint?: string | null;
+  code?: string;
+};
 
 type SupabaseError = {
   code?: string;
@@ -100,6 +107,9 @@ export async function createPatient(values: PatientFormValues, photo?: File): Pr
   const supabase = await createClient();
   if (!supabase) return { error: "Configure o Supabase para cadastrar pacientes." };
   const { data: authData } = await supabase.auth.getUser();
+  console.info("ASTER_PATIENT_AUTH_CONTEXT", {
+    authenticated_user: Boolean(authData.user),
+  });
   if (!authData.user) return { error: "Faça login para cadastrar pacientes." };
   const { data: profile } = await supabase.from("profiles").select("active_clinic_id").eq("id", authData.user.id).maybeSingle();
   if (!profile?.active_clinic_id) return { error: "Selecione ou crie uma clínica antes de cadastrar pacientes." };
@@ -110,15 +120,47 @@ export async function createPatient(values: PatientFormValues, photo?: File): Pr
     .eq("clinic_id", profile.active_clinic_id)
     .eq("status", "active")
     .maybeSingle();
+  console.info("ASTER_PATIENT_MEMBERSHIP_CONTEXT", {
+    active_membership: Boolean(membership),
+    clinic_id: profile.active_clinic_id,
+  });
   if (membershipError) return { error: databaseError("Validar acesso à clínica", membershipError) };
   if (!membership) return { error: "Seu usuário não possui vínculo ativo com a clínica selecionada." };
 
+  const patientInput = {
+    ...toPatientInput(parsed.data),
+    user_id: authData.user.id,
+    clinic_id: profile.active_clinic_id,
+  };
+  console.info("ASTER_PATIENT_INSERT_CONTEXT", {
+    user_id: authData.user.id,
+    clinic_id: profile.active_clinic_id,
+    table: "public.patients",
+    properties: Object.keys(patientInput),
+    includes_clinic_id: Object.hasOwn(patientInput, "clinic_id"),
+    includes_created_by: Object.hasOwn(patientInput, "created_by"),
+  });
+
   const { data, error } = await supabase
     .from("patients")
-    .insert({ ...toPatientInput(parsed.data), user_id: authData.user.id, clinic_id: profile.active_clinic_id })
+    .insert(patientInput)
     .select("id")
     .single();
-  if (error) return { error: databaseError("Cadastrar paciente", error) };
+  if (error) {
+    console.error("ASTER_PATIENT_INSERT_ERROR", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    });
+    return {
+      success: false,
+      error: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    };
+  }
   if (!data) return { error: "Não foi possível cadastrar o paciente: o Supabase não retornou o registro criado." };
 
   if (photo?.size) {
