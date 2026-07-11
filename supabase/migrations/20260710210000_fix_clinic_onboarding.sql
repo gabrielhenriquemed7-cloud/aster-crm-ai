@@ -24,7 +24,7 @@ begin
 
   if exists (
     select 1 from public.clinic_members
-    where user_id = current_user_id
+    where user_id = current_user_id and status = 'active'
   ) and not public.is_platform_admin() then
     raise exception using errcode = '42501', message = 'Usuários já vinculados a uma clínica não podem criar outra clínica.';
   end if;

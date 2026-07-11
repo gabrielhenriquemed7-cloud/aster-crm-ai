@@ -20,18 +20,22 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
     .select("active_clinic_id")
     .eq("id", user.id)
     .maybeSingle();
-  const { data: membership, error: membershipError } = profile?.active_clinic_id
-    ? await supabase
-        .from("clinic_members")
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("clinic_id", profile.active_clinic_id)
-        .eq("status", "active")
-        .maybeSingle()
-    : { data: null, error: null };
+  const { data: memberships, error: membershipError } = await supabase
+    .from("clinic_members")
+    .select("clinic_id")
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .order("created_at", { ascending: true });
 
-  if (!profileError && !membershipError && (!profile?.active_clinic_id || !membership)) {
+  if (membershipError) redirect("/onboarding?error=membership");
+  if (!memberships?.length) {
     redirect("/onboarding");
+  }
+
+  const hasActiveClinic = memberships.some((membership) => membership.clinic_id === profile?.active_clinic_id);
+  if (!profileError && !hasActiveClinic) {
+    const { error: activationError } = await supabase.rpc("set_active_clinic", { target_clinic_id: memberships[0].clinic_id });
+    if (activationError) redirect("/onboarding?error=clinic");
   }
 
   return <AppShell>{children}</AppShell>;
