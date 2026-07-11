@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Loader2, Save, Stethoscope } from "lucide-react";
+import { ArrowLeft, CalendarClock, Copy, FileClock, Loader2, Save, Stethoscope } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -12,8 +12,9 @@ import { saveMedicalRecord } from "@/app/(dashboard)/consultas/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { medicalRecordDefaultValues, medicalRecordSchema, type MedicalRecordFormValues } from "@/lib/medical-records/schema";
-import type { MedicalRecord, MedicalRecordAppointment } from "@/lib/medical-records/types";
+import type { MedicalRecord, MedicalRecordAppointment, MedicalRecordHistoryItem } from "@/lib/medical-records/types";
 
 type FieldName = keyof MedicalRecordFormValues;
 
@@ -86,13 +87,16 @@ function TextAreaField({ form, name, label, placeholder, rows = 5, disabled }: {
   </section>;
 }
 
-export function MedicalRecordForm({ appointment, record, canEdit }: {
+export function MedicalRecordForm({ appointment, record, history, canEdit }: {
   appointment: MedicalRecordAppointment;
   record: MedicalRecord | null;
+  history: MedicalRecordHistoryItem[];
   canEdit: boolean;
 }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
+  const [importSource, setImportSource] = useState<MedicalRecordHistoryItem | null>(null);
+  const [selectedFields, setSelectedFields] = useState<FieldName[]>([]);
   const form = useForm<MedicalRecordFormValues>({
     resolver: zodResolver(medicalRecordSchema),
     defaultValues: initialValues(record, appointment),
@@ -107,6 +111,19 @@ export function MedicalRecordForm({ appointment, record, canEdit }: {
     if (result.error) return toast.error(result.error);
     toast.success(result.success);
     router.refresh();
+  }
+
+  const importOptions: Array<{ name: FieldName; label: string }> = [
+    { name: "pmh", label: "Antecedentes" }, { name: "allergies", label: "Alergias" },
+    { name: "medications", label: "Medicamentos" }, { name: "family_history", label: "História familiar" },
+    { name: "social_history", label: "História social" }, { name: "assessment", label: "Diagnósticos" },
+    { name: "plan", label: "Plano anterior" },
+  ];
+  function importPrevious() {
+    if (!importSource) return;
+    selectedFields.forEach((field) => form.setValue(field, importSource[field] ?? "", { shouldDirty: true, shouldValidate: true }));
+    toast.success(`${selectedFields.length} campo(s) importado(s). Revise antes de salvar.`);
+    setSelectedFields([]); setImportSource(null);
   }
 
   return <form onSubmit={form.handleSubmit(submit)} className="space-y-6">
@@ -137,6 +154,13 @@ export function MedicalRecordForm({ appointment, record, canEdit }: {
         <div><p className="text-xs text-muted-foreground">Convênio</p><p className="mt-1 font-medium">{patient?.insurance || "Não informado"}</p></div>
         <div><p className="text-xs text-muted-foreground">Profissional</p><p className="mt-1 font-medium">{appointment.professional?.full_name || "Não informado"}</p></div>
       </CardContent>
+    </Card>
+
+    <Card className="shadow-none">
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="flex items-center gap-2"><FileClock className="size-5 text-primary" /> Histórico longitudinal</CardTitle><p className="mt-1 text-sm text-muted-foreground">Consultas anteriores deste paciente, em modo somente leitura.</p></div>{history[0] && canEdit && <Dialog open={Boolean(importSource)} onOpenChange={(open) => { if (!open) { setImportSource(null); setSelectedFields([]); } }}><DialogTrigger asChild><Button type="button" variant="outline" onClick={() => setImportSource(history[0])}><Copy /> Importar dados anteriores</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Importar dados anteriores</DialogTitle><DialogDescription>Escolha a consulta de origem e apenas os campos que deseja copiar. A evolução completa não será importada.</DialogDescription></DialogHeader><label className="text-sm font-medium">Consulta de origem<select className="mt-2 w-full rounded-lg border bg-background px-3 py-2" value={importSource?.id ?? ""} onChange={(event) => setImportSource(history.find((item) => item.id === event.target.value) ?? null)}>{history.map((item) => <option key={item.id} value={item.id}>{new Date(`${item.appointment_date}T12:00:00`).toLocaleDateString("pt-BR")} · {item.title}</option>)}</select></label><div className="grid gap-2 sm:grid-cols-2">{importOptions.map((option) => <label key={option.name} className="flex items-center gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={selectedFields.includes(option.name)} disabled={!importSource?.[option.name]} onChange={(event) => setSelectedFields((current) => event.target.checked ? [...current, option.name] : current.filter((field) => field !== option.name))} />{option.label}</label>)}</div><DialogFooter><DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose><Button type="button" disabled={!selectedFields.length} onClick={importPrevious}>Importar selecionados</Button></DialogFooter></DialogContent></Dialog>}</CardHeader>
+      <CardContent>{history.length ? <div className="space-y-3"><p className="text-sm"><span className="text-muted-foreground">Última consulta:</span> <strong>{new Date(`${history[0].appointment_date}T12:00:00`).toLocaleDateString("pt-BR")}</strong> com {history[0].professional_name}</p><div className="space-y-3 border-l-2 pl-4">{history.map((item) => <Dialog key={item.id}><DialogTrigger asChild><button type="button" className="w-full rounded-xl border p-4 text-left transition-colors hover:bg-muted/40"><span className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{item.title}</span><Badge variant="outline"><CalendarClock className="size-3" /> {new Date(`${item.appointment_date}T12:00:00`).toLocaleDateString("pt-BR")}</Badge></span><span className="mt-2 block text-sm text-muted-foreground">{item.chief_complaint || "Sem queixa principal registrada"} · {item.professional_name}</span></button></DialogTrigger><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle>{item.title}</DialogTitle><DialogDescription>{new Date(`${item.appointment_date}T12:00:00`).toLocaleDateString("pt-BR")} às {item.start_time.slice(0, 5)} · {item.professional_name} · somente leitura</DialogDescription></DialogHeader><div className="grid gap-4 sm:grid-cols-2">{[
+              ["Queixa principal", item.chief_complaint], ["HDA", item.hpi], ["Avaliação", item.assessment], ["CID", item.cid10], ["Conduta", item.plan], ["Prescrições", item.prescription], ["Solicitações de exames", item.exam_requests], ["Alergias", item.allergies], ["Medicamentos em uso", item.medications],
+            ].map(([label, value]) => <div key={label} className="rounded-lg border p-3"><p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p><p className="mt-2 whitespace-pre-wrap text-sm">{value || "Não informado"}</p></div>)}</div></DialogContent></Dialog>)}</div></div> : <div className="py-8 text-center"><FileClock className="mx-auto size-7 text-muted-foreground" /><p className="mt-2 text-sm text-muted-foreground">Nenhuma consulta anterior com prontuário.</p></div>}</CardContent>
     </Card>
 
     <div className="grid gap-6 lg:grid-cols-2">

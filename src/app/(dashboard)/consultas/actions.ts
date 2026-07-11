@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { medicalRecordSchema, type MedicalRecordFormValues } from "@/lib/medical-records/schema";
-import type { MedicalRecord, MedicalRecordAppointment } from "@/lib/medical-records/types";
+import type { MedicalRecord, MedicalRecordAppointment, MedicalRecordHistoryItem } from "@/lib/medical-records/types";
 import { createClient } from "@/lib/supabase/server";
 
 type SaveResult = { error?: string; id?: string; success?: string };
@@ -56,16 +56,18 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     .maybeSingle();
   if (appointmentError || !appointment) return null;
 
-  const [{ data: professional }, { data: record, error: recordError }] = await Promise.all([
+  const [{ data: professional }, { data: record, error: recordError }, { data: historyRecords, error: historyError }] = await Promise.all([
     current.supabase.from("profiles").select("full_name").eq("id", appointment.professional_id).maybeSingle(),
     current.supabase.from("medical_records").select("*").eq("appointment_id", appointmentId).is("deleted_at", null).maybeSingle(),
+    current.supabase.from("medical_records").select("*").eq("clinic_id", current.clinicId).eq("patient_id", appointment.patient_id).neq("appointment_id", appointmentId).is("deleted_at", null),
   ]);
-  if (recordError) {
+  if (recordError || historyError) {
+    const loadError = recordError ?? historyError;
     console.error("medical record load failed", {
-      message: recordError.message,
-      details: recordError.details,
-      hint: recordError.hint,
-      code: recordError.code,
+      message: loadError?.message,
+      details: loadError?.details,
+      hint: loadError?.hint,
+      code: loadError?.code,
     });
     return { error: "Não foi possível carregar o prontuário.", appointment: null, record: null, canEdit: false };
   }
@@ -76,10 +78,30 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     professional,
   } as MedicalRecordAppointment;
 
+  const historyAppointmentIds = (historyRecords ?? []).map((item) => item.appointment_id);
+  const { data: historyAppointments, error: appointmentsHistoryError } = historyAppointmentIds.length
+    ? await current.supabase.from("appointments").select("id, appointment_date, start_time, title, professional_id").in("id", historyAppointmentIds).eq("clinic_id", current.clinicId)
+    : { data: [], error: null };
+  if (appointmentsHistoryError) return { error: "Não foi possível carregar o histórico do paciente.", appointment: null, record: null, history: [], canEdit: false };
+  const previousAppointments = (historyAppointments ?? []).filter((item) =>
+    item.appointment_date < appointment.appointment_date || (item.appointment_date === appointment.appointment_date && item.start_time < appointment.start_time),
+  );
+  const professionalIds = [...new Set(previousAppointments.map((item) => item.professional_id))];
+  const { data: historyProfessionals } = professionalIds.length
+    ? await current.supabase.from("profiles").select("id, full_name").in("id", professionalIds)
+    : { data: [] };
+  const appointmentMap = new Map(previousAppointments.map((item) => [item.id, item]));
+  const professionalMap = new Map((historyProfessionals ?? []).map((item) => [item.id, item.full_name]));
+  const history = (historyRecords ?? []).flatMap((item) => {
+    const source = appointmentMap.get(item.appointment_id); if (!source) return [];
+    return [{ ...item, appointment_date: source.appointment_date, start_time: source.start_time, title: source.title, professional_name: professionalMap.get(source.professional_id) ?? "Profissional" } as MedicalRecordHistoryItem];
+  }).sort((a, b) => `${b.appointment_date} ${b.start_time}`.localeCompare(`${a.appointment_date} ${a.start_time}`));
+
   return {
     error: null,
     appointment: normalizedAppointment,
     record: (record as MedicalRecord | null) ?? null,
+    history,
     canEdit: appointment.professional_id === current.userId,
   };
 }

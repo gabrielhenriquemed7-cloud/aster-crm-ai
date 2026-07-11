@@ -46,3 +46,10 @@ export interface MedicalRecordAppointment {
   } | null;
   professional: { full_name: string | null } | null;
 }
+
+export interface MedicalRecordHistoryItem extends MedicalRecord {
+  appointment_date: string;
+  start_time: string;
+  title: string;
+  professional_name: string;
+}
