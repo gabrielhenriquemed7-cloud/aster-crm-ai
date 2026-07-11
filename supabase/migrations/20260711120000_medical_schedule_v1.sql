@@ -221,6 +221,25 @@ create trigger appointments_enforce_tenant_and_conflict
 before insert or update on public.appointments
 for each row execute function public.enforce_appointment_tenant_and_conflict();
 
+create or replace function public.is_active_clinic_member(target_clinic_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.clinic_members member
+    where member.user_id = auth.uid()
+      and member.clinic_id = target_clinic_id
+      and member.status = 'active'
+  );
+$$;
+
+revoke all on function public.is_active_clinic_member(uuid) from public;
+grant execute on function public.is_active_clinic_member(uuid) to authenticated;
+
 alter table public.appointments enable row level security;
 drop policy if exists "Users manage their own appointments" on public.appointments;
 drop policy if exists "Clinic isolation for appointments" on public.appointments;
