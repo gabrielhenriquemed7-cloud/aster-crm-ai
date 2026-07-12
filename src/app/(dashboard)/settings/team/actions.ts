@@ -20,19 +20,10 @@ const updateSchema = z.object({
 }).refine((value) => value.role || value.status, "Nenhuma alteração informada.");
 const idSchema = z.string().uuid("Identificador inválido.");
 
-function databaseMessage(error: { message?: string } | null, fallback: string) {
-  const message = error?.message ?? "";
-  const known = [
-    "Sem permissão",
-    "Vínculo não encontrado",
-    "Papel inválido",
-    "Status inválido",
-    "A clínica precisa manter",
-    "Este usuário já está vinculado",
-    "Convite não encontrado",
-    "Informe um e-mail válido",
-  ];
-  return known.some((fragment) => message.includes(fragment)) ? message : fallback;
+type SupabaseError = { message?: string; details?: string; hint?: string; code?: string } | null;
+function databaseMessage(error: SupabaseError, fallback: string) {
+  console.error("ASTER_SETTINGS_ERROR", { section: "users", message: error?.message, details: error?.details, hint: error?.hint, code: error?.code });
+  return `${error?.code ?? "SEM_CODIGO"}: ${error?.message ?? fallback}`;
 }
 
 async function adminContext() {
@@ -97,7 +88,7 @@ export async function getClinicContext() {
     current.supabase.rpc("list_active_clinic_team"),
   ]);
   if (clinicError || teamError) {
-    return { clinic: null as Clinic | null, records: [] as TeamRecord[], error: "Não foi possível carregar a equipe." };
+    return { clinic: null as Clinic | null, records: [] as TeamRecord[], error: databaseMessage(clinicError ?? teamError, "Não foi possível carregar a equipe.") };
   }
   return { clinic: clinic as Clinic, records: (records ?? []) as TeamRecord[], error: null };
 }
