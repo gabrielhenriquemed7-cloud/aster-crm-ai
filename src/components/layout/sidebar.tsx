@@ -49,7 +49,7 @@ const navigationItems: NavigationItem[] = [
   { href: "/ia-clinica", label: "IA Clínica", icon: Bot },
   { href: "/financeiro", label: "Financeiro", icon: CircleDollarSign },
   { href: "/relatorios", label: "Relatórios", icon: FileBarChart2 },
-  { href: "/settings/team", label: "Configurações", icon: Settings },
+  { href: "/configuracoes/clinica", label: "Configurações", icon: Settings },
 ];
 
 function Brand({ collapsed }: { collapsed: boolean }) {

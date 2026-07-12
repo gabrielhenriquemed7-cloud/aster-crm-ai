@@ -208,7 +208,7 @@ export function MedicalRecordForm({ appointment, record, history, patientDocumen
 
     {(patient?.allergies || patient?.continuous_medications) && <div className="grid gap-3 sm:grid-cols-2">{patient.allergies && <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4"><p className="text-xs font-semibold uppercase text-destructive">Alergias</p><p className="mt-1 whitespace-pre-wrap text-sm">{patient.allergies}</p></div>}{patient.continuous_medications && <div className="rounded-xl border bg-muted/30 p-4"><p className="text-xs font-semibold uppercase text-muted-foreground">Medicamentos em uso</p><p className="mt-1 whitespace-pre-wrap text-sm">{patient.continuous_medications}</p></div>}</div>}
 
-    <RecordDocuments appointmentId={appointment.id} canCreate={appointment.status === "in_progress" && appointment.professional_id === record?.professional_id} />
+    <RecordDocuments appointmentId={appointment.id} canCreate={canEdit} />
 
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
     <aside className="xl:sticky xl:top-6"><Card className="shadow-none">
