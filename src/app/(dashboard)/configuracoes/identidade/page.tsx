@@ -1,0 +1,3 @@
+import { getClinicSettings } from "@/app/(dashboard)/configuracoes/actions";
+import { ClinicSettingsForm } from "@/components/clinics/clinic-settings-form";
+export default async function VisualIdentityPage() { const data = await getClinicSettings(); return <div className="space-y-4"><h2 className="text-xl font-semibold">Identidade visual</h2><p className="text-sm text-muted-foreground">A identidade visual usa a logomarca e os dados da aba Clínica, preservando contraste e legibilidade.</p>{data.error ? <p className="rounded-xl border border-destructive/30 p-4 text-destructive">{data.error}</p> : data.clinic ? <ClinicSettingsForm clinic={data.clinic as Record<string, unknown>} /> : null}</div>; }

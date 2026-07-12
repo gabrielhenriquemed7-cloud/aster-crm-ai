@@ -84,7 +84,7 @@ export async function getAppointment(id: string) {
 
 export async function getAppointmentFormData() {
   const current = await context();
-  if (current.error) return { patients: [] as Pick<Patient, "id" | "full_name">[], professionals: [] as Professional[], currentUserId: "", error: current.error };
+  if (current.error) return { patients: [] as Pick<Patient, "id" | "full_name">[], professionals: [] as Professional[], currentUserId: "", defaultDuration: 30, error: current.error };
   const [{ data: patients }, { data: members }] = await Promise.all([
     current.supabase.from("patients").select("id, full_name").eq("clinic_id", current.clinicId).is("deleted_at", null).order("full_name"),
     current.supabase.from("clinic_members").select("user_id, role").eq("clinic_id", current.clinicId).eq("status", "active").in("role", ["clinic_admin", "doctor"]),
@@ -93,7 +93,8 @@ export async function getAppointmentFormData() {
   const { data: profiles } = memberIds.length ? await current.supabase.from("profiles").select("id, full_name").in("id", memberIds) : { data: [] };
   const profileNames = new Map((profiles ?? []).map((profile) => [profile.id, profile.full_name]));
   const professionals = (members ?? []).map((member) => ({ id: member.user_id, role: member.role, full_name: profileNames.get(member.user_id) ?? "Profissional" }));
-  return { patients: (patients ?? []) as Pick<Patient, "id" | "full_name">[], professionals, currentUserId: current.userId, error: null };
+  const { data: schedule } = await current.supabase.from("schedule_settings").select("default_duration").eq("clinic_id", current.clinicId).maybeSingle();
+  return { patients: (patients ?? []) as Pick<Patient, "id" | "full_name">[], professionals, currentUserId: current.userId, defaultDuration: schedule?.default_duration ?? 30, error: null };
 }
 
 async function saveAppointment(id: string | null, values: AppointmentFormValues): Promise<Result> {

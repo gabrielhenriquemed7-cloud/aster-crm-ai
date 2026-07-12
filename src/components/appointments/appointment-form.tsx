@@ -17,12 +17,12 @@ import { appointmentStatusLabels, appointmentTypeLabels, type Appointment, type 
 function today() { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bahia" }).format(new Date()); }
 function addMinutes(time: string, minutes: number) { const [hours, mins] = time.split(":").map(Number); const total = hours * 60 + mins + minutes; return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`; }
 
-export function AppointmentForm({ appointment, patients, professionals, currentUserId, initialDate, initialPatientId, initialProfessionalId, initialType }: { appointment?: Appointment; patients: { id: string; full_name: string }[]; professionals: Professional[]; currentUserId: string; initialDate?: string; initialPatientId?: string; initialProfessionalId?: string; initialType?: "return" }) {
+export function AppointmentForm({ appointment, patients, professionals, currentUserId, defaultDuration = 30, initialDate, initialPatientId, initialProfessionalId, initialType }: { appointment?: Appointment; patients: { id: string; full_name: string }[]; professionals: Professional[]; currentUserId: string; defaultDuration?: number; initialDate?: string; initialPatientId?: string; initialProfessionalId?: string; initialType?: "return" }) {
   const router = useRouter(); const [saving, setSaving] = useState(false);
   const form = useForm<AppointmentFormValues>({ resolver: zodResolver(appointmentSchema), defaultValues: {
     patient_id: appointment?.patient_id ?? (patients.some((item) => item.id === initialPatientId) ? initialPatientId! : ""), professional_id: appointment?.professional_id ?? (professionals.some((item) => item.id === initialProfessionalId) ? initialProfessionalId! : professionals.some((item) => item.id === currentUserId) ? currentUserId : ""),
     title: appointment?.title ?? "Consulta", appointment_date: appointment?.appointment_date ?? initialDate ?? today(), start_time: appointment?.start_time?.slice(0, 5) ?? "08:00",
-    end_time: appointment?.end_time?.slice(0, 5) ?? "08:30", appointment_type: appointment?.appointment_type ?? initialType ?? "consultation", status: appointment?.status ?? "scheduled",
+    end_time: appointment?.end_time?.slice(0, 5) ?? addMinutes("08:00", defaultDuration), appointment_type: appointment?.appointment_type ?? initialType ?? "consultation", status: appointment?.status ?? "scheduled",
     notes: appointment?.notes ?? "", cancellation_reason: appointment?.cancellation_reason ?? "",
   } });
   const startTime = useWatch({ control: form.control, name: "start_time" });
