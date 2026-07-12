@@ -31,9 +31,9 @@ const sections: Array<{ name: FieldName; label: string; placeholder?: string; ro
   { name: "assessment", label: "Diagnósticos / avaliação" },
   { name: "cid10", label: "CID-10", placeholder: "Códigos e descrições dos diagnósticos." },
   { name: "plan", label: "Conduta" },
-  { name: "prescription", label: "Prescrição", placeholder: "Registro textual. Prescrição eletrônica não está habilitada nesta fase." },
+  { name: "prescription", label: "Prescrição", placeholder: "Resumo da prescrição e observações clínicas. Use Documentos clínicos para emitir a receita." },
   { name: "exam_requests", label: "Solicitação de exames" },
-  { name: "certificate", label: "Atestados", placeholder: "Registro textual. Emissão eletrônica não está habilitada nesta fase." },
+  { name: "certificate", label: "Atestados", placeholder: "Resumo do afastamento e observações clínicas. Use Documentos clínicos para emitir o atestado." },
   { name: "guidance", label: "Orientações" },
   { name: "return_guidance", label: "Retorno", placeholder: "Data sugerida e observações para retorno." },
 ];
