@@ -593,13 +593,6 @@ export function MedicalRecordForm({
 
       <RecordDocuments appointmentId={appointment.id} canCreate={canEdit} />
 
-      <ClinicalAiPanel
-        appointmentId={appointment.id}
-        form={form}
-        enabled={aiEnabled}
-        canEdit={canEdit}
-      />
-
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <aside className="xl:sticky xl:top-6">
           <Card className="shadow-none">
@@ -864,6 +857,13 @@ export function MedicalRecordForm({
           ))}
         </div>
       </div>
+
+      <ClinicalAiPanel
+        appointmentId={appointment.id}
+        form={form}
+        enabled={aiEnabled}
+        canEdit={canEdit}
+      />
     </form>
   );
 }
