@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input";
 type Field = {
   key: string;
   label: string;
-  type?: "text" | "number" | "time" | "checkbox";
+  type?: "text" | "number" | "time" | "checkbox" | "select";
+  options?: Array<{ label: string; value: string }>;
 };
 export function SettingsForm({
   kind,
@@ -44,13 +45,13 @@ export function SettingsForm({
     setSuccess("");
     try {
       const result = await saveSettings(kind, values);
-      if ("error" in result) {
-        const message = result.error ?? "SEM_CODIGO: Não foi possível salvar.";
+      if (!result.success) {
+        const message = `Não foi possível salvar: ${result.error}`;
         setError(message);
         toast.error(message);
         return;
       }
-      const message = result.success ?? "Configurações salvas com sucesso";
+      const message = result.message;
       setSuccess(message);
       toast.success(message);
       router.refresh();
@@ -81,6 +82,26 @@ export function SettingsForm({
               }
             />
             {field.label}
+          </label>
+        ) : field.type === "select" ? (
+          <label key={field.key}>
+            <span className="text-sm font-medium">{field.label}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-lg border bg-background px-2.5 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              value={String(values[field.key] ?? "")}
+              onChange={(event) =>
+                setValues((current) => ({
+                  ...current,
+                  [field.key]: event.target.value,
+                }))
+              }
+            >
+              {field.options?.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
         ) : (
           <label key={field.key}>

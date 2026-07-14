@@ -31,7 +31,8 @@ function aiSettingsSaveError(
     hasActiveClinic,
   });
   return {
-    error: `${error?.code ?? "SEM_CODIGO"}: ${error?.message ?? "Não foi possível salvar as configurações da IA."}`,
+    success: false as const,
+    error: `${error?.code ?? "SEM_CODIGO"} — ${error?.message ?? "Não foi possível salvar as configurações da IA."}`,
   };
 }
 
@@ -63,7 +64,7 @@ const documentSchema = z.object({
   show_council: z.boolean(), show_specialty: z.boolean(), show_rqe: z.boolean(), physical_signature_space: z.boolean(), automatic_numbering: z.boolean(),
 });
 const aiSchema = z.object({
-  language: z.string().trim().min(2), default_specialty: z.string(), detail_level: z.string().trim().min(2), evolution_format: z.string().trim().min(2),
+  language: z.string().trim().min(2), default_specialty: z.string(), detail_level: z.enum(["resumido", "standard", "detalhado"]), evolution_format: z.enum(["free", "soap", "structured_anamnesis"]),
   consent_text: z.string(), enabled: z.boolean(), suggest_cid: z.boolean(), suggest_differentials: z.boolean(), suggest_exams: z.boolean(),
   suggest_conduct: z.boolean(), require_human_review: z.boolean(),
 });
@@ -168,14 +169,14 @@ export async function saveSettings(kind: "document_settings" | "schedule_setting
   const parsed = config.schema.safeParse(input);
   if (!parsed.success) {
     const error = { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Dados inválidos." };
-    return kind === "ai_settings" ? aiSettingsSaveError(error, false, false) : { error: `${error.code}: ${error.message}` };
+    return kind === "ai_settings" ? aiSettingsSaveError(error, false, false) : { success: false as const, error: `${error.code} — ${error.message}` };
   }
   try {
     const c = await context(true);
     if (c.error || !c.supabase) {
       return kind === "ai_settings"
         ? aiSettingsSaveError({ message: c.error ?? "Supabase não configurado." }, Boolean(c.userId), Boolean(c.clinicId))
-        : { error: c.error };
+        : { success: false as const, error: c.error ?? "SEM_CODIGO — Supabase não configurado." };
     }
     const { data, error } = await c.supabase
       .from(kind)
@@ -188,21 +189,21 @@ export async function saveSettings(kind: "document_settings" | "schedule_setting
     if (error) {
       return kind === "ai_settings"
         ? aiSettingsSaveError(error, true, true)
-        : settingsError(config.section, error);
+        : { success: false as const, error: settingsError(config.section, error).error.replace(":", " —") };
     }
     if (!data) {
       const error = { code: "PGRST116", message: "A configuração não foi salva. Verifique a policy RLS." };
       return kind === "ai_settings"
         ? aiSettingsSaveError(error, true, true)
-        : settingsError(config.section, error);
+        : { success: false as const, error: settingsError(config.section, error).error.replace(":", " —") };
     }
     revalidatePath(`/configuracoes/${config.route}`);
-    return { success: "Configurações salvas com sucesso", settings: data };
+    return { success: true as const, message: "Configurações salvas com sucesso.", settings: data };
   } catch (cause) {
     const error = cause instanceof Error ? { message: cause.message } : { message: "Erro inesperado ao salvar." };
     return kind === "ai_settings"
       ? aiSettingsSaveError(error, false, false)
-      : settingsError(config.section, error);
+      : { success: false as const, error: settingsError(config.section, error).error.replace(":", " —") };
   }
 }
 
