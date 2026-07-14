@@ -35,6 +35,7 @@ import type { ClinicalAiRequestType } from "@/lib/ai/clinical-assistant";
 import type { MedicalRecordFormValues } from "@/lib/medical-records/schema";
 
 type FieldName = keyof MedicalRecordFormValues;
+type ConflictResolution = "keep" | "append" | "replace";
 type Section = {
   key: keyof ClinicalAiSuggestion;
   label: string;
@@ -48,9 +49,16 @@ const sections: Section[] = [
     field: "chief_complaint",
   },
   { key: "hpi", label: "HDA", field: "hpi" },
-  { key: "personalHistory", label: "Antecedentes", field: "pmh" },
+  { key: "personalHistory", label: "Antecedentes pessoais", field: "pmh" },
+  {
+    key: "familyHistory",
+    label: "Antecedentes familiares",
+    field: "family_history",
+  },
   { key: "allergies", label: "Alergias", field: "allergies" },
   { key: "medications", label: "Medicamentos em uso", field: "medications" },
+  { key: "socialHistory", label: "Hábitos de vida", field: "social_history" },
+  { key: "reviewOfSystems", label: "Revisão de sistemas", field: "hpi" },
   { key: "physicalExam", label: "Exame físico", field: "physical_exam" },
   { key: "clinicalAssessment", label: "Avaliação", field: "assessment" },
   {
@@ -60,7 +68,9 @@ const sections: Section[] = [
   },
   { key: "cid10Suggestions", label: "CID-10 sugeridos", field: "cid10" },
   { key: "suggestedExams", label: "Exames sugeridos", field: "exam_requests" },
-  { key: "plan", label: "Conduta sugerida", field: "plan" },
+  { key: "plan", label: "Conduta", field: "plan" },
+  { key: "guidance", label: "Orientações", field: "guidance" },
+  { key: "followUp", label: "Retorno", field: "return_guidance" },
   {
     key: "alertsAndMissingInformation",
     label: "Alertas e informações faltantes",
@@ -94,12 +104,14 @@ export function ClinicalAIPanel({
   enabled,
   canEdit,
   canManageAi,
+  onFieldsInserted,
 }: {
   appointmentId: string;
   form: UseFormReturn<MedicalRecordFormValues>;
   enabled: boolean;
   canEdit: boolean;
   canManageAi: boolean;
+  onFieldsInserted: (fields: FieldName[]) => void;
 }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -118,6 +130,9 @@ export function ClinicalAIPanel({
   const [conflicts, setConflicts] = useState<
     Array<{ field: FieldName; label: string; value: string; keys: string[] }>
   >([]);
+  const [resolutions, setResolutions] = useState<
+    Partial<Record<FieldName, ConflictResolution>>
+  >({});
 
   const visibleSections = useMemo(
     () => sections.filter((section) => suggestion?.[section.key]?.trim()),
@@ -126,7 +141,10 @@ export function ClinicalAIPanel({
 
   if (!enabled) {
     return (
-      <Card id="aster-copilot" className="w-full border-amber-500/30 bg-amber-500/5 shadow-none">
+      <Card
+        id="aster-copilot"
+        className="w-full border-amber-500/30 bg-amber-500/5 shadow-none"
+      >
         <CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
           <div>
             <p className="font-medium">
@@ -218,25 +236,64 @@ export function ClinicalAIPanel({
     );
     if (occupied.length) {
       setConflicts(pending);
+      setResolutions(
+        Object.fromEntries(occupied.map((item) => [item.field, "keep"])),
+      );
       return;
     }
     applyInsertion(pending);
   }
 
-  function applyInsertion(items: ReturnType<typeof proposals>) {
-    items.forEach((item) =>
-      form.setValue(item.field, item.value, {
+  function applyInsertion(
+    items: ReturnType<typeof proposals>,
+    choices: Partial<Record<FieldName, ConflictResolution>> = {},
+  ) {
+    const inserted = items
+      .map((item) => {
+        const current = form.getValues(item.field)?.trim() ?? "";
+        const choice = current ? (choices[item.field] ?? "keep") : "replace";
+        if (choice === "keep") return null;
+        return {
+          ...item,
+          finalValue:
+            choice === "append" ? `${current}\n\n${item.value}` : item.value,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    if (inserted.length) onFieldsInserted(inserted.map((item) => item.field));
+    inserted.forEach((item) => {
+      form.setValue(item.field, item.finalValue, {
         shouldDirty: true,
         shouldValidate: true,
-      }),
-    );
-    const accepted = items.flatMap((item) => item.keys);
-    if (generationId)
+      });
+    });
+    const accepted = inserted.flatMap((item) => item.keys);
+    if (generationId && accepted.length)
       void acceptClinicalAiSections({ generationId, sections: accepted });
     setConflicts([]);
+    setResolutions({});
     setSuccess(
-      "Campos selecionados inseridos no rascunho. Revise antes de salvar o prontuário.",
+      inserted.length
+        ? "Conteúdo inserido no formulário. Revise e salve o prontuário quando estiver de acordo."
+        : "O conteúdo atual foi mantido. Nenhum campo foi alterado.",
     );
+  }
+
+  async function copySection(section: Section) {
+    try {
+      await navigator.clipboard.writeText(suggestion?.[section.key] ?? "");
+      setSuccess(`${sectionLabel(section, lastRequest)} copiado.`);
+    } catch {
+      setError("Não foi possível copiar o campo.");
+    }
+  }
+
+  function discardSection(section: Section) {
+    setSuggestion((current) =>
+      current ? { ...current, [section.key]: "" } : current,
+    );
+    setSelected((current) => current.filter((key) => key !== section.key));
+    setSuccess(`${sectionLabel(section, lastRequest)} descartado.`);
   }
 
   async function discard() {
@@ -376,6 +433,24 @@ export function ClinicalAIPanel({
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setSelected(visibleSections.map((section) => section.key))
+                }
+              >
+                Selecionar tudo
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setSelected([])}
+              >
+                Desmarcar tudo
+              </Button>
+              <Button
+                type="button"
                 onClick={insertSelected}
                 disabled={!canEdit || !selected.length}
               >
@@ -385,25 +460,54 @@ export function ClinicalAIPanel({
                 <Clipboard /> Copiar tudo
               </Button>
               <Button type="button" variant="outline" onClick={discard}>
-                <Trash2 /> Descartar
+                <Trash2 /> Descartar resposta completa
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loading || !lastRequest}
+                onClick={() => lastRequest && generate(lastRequest)}
+              >
+                <RotateCcw /> Regenerar
               </Button>
             </div>
             {visibleSections.map((section) => (
               <section key={section.key} className="rounded-xl border p-4">
-                <label className="flex items-center gap-2 text-sm font-semibold">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(section.key)}
-                    onChange={(event) =>
-                      setSelected((current) =>
-                        event.target.checked
-                          ? [...current, section.key]
-                          : current.filter((key) => key !== section.key),
-                      )
-                    }
-                  />
-                  {sectionLabel(section, lastRequest)}
-                </label>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex items-center gap-2 text-sm font-semibold">
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(section.key)}
+                      onChange={(event) =>
+                        setSelected((current) =>
+                          event.target.checked
+                            ? [...new Set([...current, section.key])]
+                            : current.filter((key) => key !== section.key),
+                        )
+                      }
+                    />
+                    Selecionar para inserir ·{" "}
+                    {sectionLabel(section, lastRequest)}
+                  </label>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => copySection(section)}
+                    >
+                      <Clipboard /> Copiar
+                    </Button>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => discardSection(section)}
+                    >
+                      <Trash2 /> Descartar campo
+                    </Button>
+                  </div>
+                </div>
                 <textarea
                   rows={3}
                   value={suggestion[section.key]}
@@ -416,6 +520,12 @@ export function ClinicalAIPanel({
                   }
                   className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm leading-6"
                 />
+                {(section.key === "diagnosticHypotheses" ||
+                  section.key === "cid10Suggestions") && (
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                    Necessita correlação e validação clínica pelo profissional.
+                  </p>
+                )}
               </section>
             ))}
             <p className="text-xs text-muted-foreground">
@@ -429,23 +539,54 @@ export function ClinicalAIPanel({
       <Dialog
         open={conflicts.length > 0}
         onOpenChange={(open) => {
-          if (!open) setConflicts([]);
+          if (!open) {
+            setConflicts([]);
+            setResolutions({});
+          }
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Substituir campos preenchidos?</DialogTitle>
+            <DialogTitle>Conteúdo existente no prontuário</DialogTitle>
             <DialogDescription>
-              Os campos abaixo já possuem conteúdo. Confirme somente se deseja
-              substituí-los pela sugestão revisada da IA.
+              Escolha como tratar cada campo preenchido. A opção padrão mantém o
+              conteúdo atual.
             </DialogDescription>
           </DialogHeader>
           <ul className="space-y-2 text-sm">
             {conflicts
               .filter((item) => form.getValues(item.field)?.trim())
               .map((item) => (
-                <li key={item.field} className="rounded-lg border p-3">
-                  {item.label}
+                <li
+                  key={item.field}
+                  className="space-y-3 rounded-lg border p-3"
+                >
+                  <p className="font-medium">{item.label}</p>
+                  <div className="grid gap-2">
+                    {[
+                      ["keep", "Manter conteúdo atual"],
+                      ["append", "Acrescentar ao final"],
+                      ["replace", "Substituir pelo conteúdo da IA"],
+                    ].map(([value, label]) => (
+                      <label key={value} className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name={`conflict-${item.field}`}
+                          value={value}
+                          checked={
+                            (resolutions[item.field] ?? "keep") === value
+                          }
+                          onChange={() =>
+                            setResolutions((current) => ({
+                              ...current,
+                              [item.field]: value as ConflictResolution,
+                            }))
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
                 </li>
               ))}
           </ul>
@@ -455,8 +596,11 @@ export function ClinicalAIPanel({
                 Cancelar
               </Button>
             </DialogClose>
-            <Button type="button" onClick={() => applyInsertion(conflicts)}>
-              Confirmar substituição
+            <Button
+              type="button"
+              onClick={() => applyInsertion(conflicts, resolutions)}
+            >
+              Aplicar escolhas
             </Button>
           </DialogFooter>
         </DialogContent>

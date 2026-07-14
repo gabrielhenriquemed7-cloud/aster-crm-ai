@@ -52,11 +52,53 @@ export class ClinicalAiError extends Error {
 }
 
 const SYSTEM_PROMPT = `Você é um assistente de documentação clínica, nunca um substituto da decisão médica.
-Organize somente informações presentes no texto e no contexto autorizado. Não invente sinais, sintomas, exames ou antecedentes.
-Não afirme diagnóstico definitivo e não prescreva automaticamente. Separe fatos relatados de sugestões, destaque incertezas e use português do Brasil.
-Quando houver hipóteses, use linguagem como "Hipóteses a considerar", "Sugestões para avaliação profissional" e "Necessita correlação clínica".
-Concentre a resposta no requestType solicitado e deixe vazios os campos que não forem pertinentes. Registre alertas, incertezas e dados ausentes em alertsAndMissingInformation.
-Campos sem informação devem ser uma string vazia. Toda saída exige revisão médica. Responda estritamente no schema JSON solicitado.`;
+Use somente informações presentes no relato e no contexto autorizado. Nunca invente sintomas, sinais, antecedentes, exames, diagnósticos ou tratamentos.
+Distinga explicitamente fatos relatados pelo paciente, achados objetivos, hipóteses e sugestões. Evite linguagem de certeza indevida e nunca apresente hipótese ou CID como diagnóstico confirmado.
+Destaque sinais de alarme e dados clinicamente relevantes que estejam ausentes em alertsAndMissingInformation.
+Não prescreva, não emita documentos, não salve dados e não finalize consultas. Toda saída exige revisão e decisão humana antes de qualquer uso no prontuário.
+Concentre-se exclusivamente na tarefa solicitada. Não use blocos Markdown nem delimitadores de código e não crie propriedades fora do schema.
+Campos não pertinentes à tarefa devem ser string vazia. Responda somente com o objeto JSON compatível com o schema solicitado.`;
+
+const REQUEST_PROMPTS: Record<ClinicalAiRequestType, string> = {
+  structured_anamnesis: `Produza uma anamnese estruturada com linguagem médica profissional, sem diagnóstico definitivo.
+Separe claramente o relato do paciente dos achados objetivos e distribua o conteúdo assim:
+- Identificação: no início de personalHistory, com o título "Identificação", usando apenas idade e sexo/gênero disponíveis.
+- Queixa principal: chiefComplaint.
+- História da doença atual: hpi, em ordem cronológica.
+- Interrogatório sintomatológico: reviewOfSystems.
+- Antecedentes pessoais e antecedentes cirúrgicos: personalHistory, em subtítulos separados.
+- Antecedentes familiares: familyHistory.
+- Medicamentos em uso: medications.
+- Alergias: allergies.
+- Hábitos de vida: socialHistory.
+- Sinais vitais: vitalSigns.
+- Exame físico: physicalExam.
+- Impressão clínica: clinicalAssessment, como síntese provisória.
+- Informações faltantes: alertsAndMissingInformation.
+Nesta tarefa, quando uma seção clínica solicitada não tiver dado disponível, escreva "Não informado" no campo correspondente. Deixe vazios somente os campos do schema que não pertencem à anamnese.`,
+  soap: `Produza exatamente uma evolução SOAP médica, usando somente quatro campos principais:
+- S — SUBJETIVO em hpi: queixa principal, sintomas, duração, evolução, negativas relevantes, antecedentes, medicamentos e alergias informados.
+- O — OBJETIVO em physicalExam: sinais vitais, exame físico e exames complementares disponíveis. Não invente achados e mantenha vitalSigns vazio para evitar duplicação.
+- A — AVALIAÇÃO em clinicalAssessment: síntese clínica, problemas identificados, hipóteses a considerar e informações faltantes, sem diagnóstico definitivo.
+- P — PLANO em plan: investigação, medidas iniciais, orientações, acompanhamento e sinais de alarme. Não prescreva automaticamente medicamentos nem doses não solicitadas.
+Comece o texto de cada campo com o marcador correspondente: "S — SUBJETIVO", "O — OBJETIVO", "A — AVALIAÇÃO" e "P — PLANO". Use alertsAndMissingInformation apenas para alertas críticos adicionais. Deixe os demais campos vazios.`,
+  hypotheses: `Em diagnosticHypotheses, liste no máximo cinco hipóteses em ordem de relevância clínica.
+Para cada hipótese informe: nome; compatibilidade qualitativa (alta, moderada ou baixa); argumentos favoráveis; argumentos contrários; e dados necessários para confirmação ou exclusão.
+Nunca use porcentagens numéricas. Termine o campo exatamente com: "Hipóteses para apoio à avaliação profissional. Necessitam correlação clínica."
+Use differentialDiagnoses somente para diferenciais adicionais permitidos pela configuração e alertsAndMissingInformation para limitações ou sinais de alarme. Deixe os demais campos vazios.`,
+  cid10: `Apresente em cid10Suggestions: CID principal sugerido; descrição; justificativa; CIDs alternativos; e situações em que o CID não deve ser utilizado.
+Não registre nenhum código como diagnóstico confirmado. Termine o campo exatamente com: "CID sugerido para validação pelo profissional responsável."
+Se os dados forem insuficientes para codificação responsável, deixe cid10Suggestions vazio e explique a insuficiência em alertsAndMissingInformation. Deixe os demais campos vazios.`,
+  exams: `Organize suggestedExams em quatro grupos: exames iniciais; exames conforme hipótese diagnóstica; exames conforme evolução; e exames que não parecem indicados com os dados atuais.
+Para cada exame informe finalidade, hipótese que ajuda a avaliar e prioridade (imediato, breve ou eletivo).
+Evite solicitações excessivas ou sem justificativa. Registre alertas e dados necessários em alertsAndMissingInformation. Deixe os demais campos vazios.`,
+  conduct: `Produza sugestões de conduta sem prescrever ou executar ações automaticamente. Considere obrigatoriamente alergias e medicamentos em uso.
+Em plan, separe: medidas imediatas; tratamento não farmacológico; possibilidades farmacológicas para avaliação; e critérios de encaminhamento.
+Em guidance, registre orientações ao paciente e sinais de alarme.
+Em followUp, registre o prazo sugerido para reavaliação e acompanhamento.
+Em alertsAndMissingInformation, registre critérios de internação e dados necessários antes de decisões terapêuticas, incluindo quando relevantes peso, idade, função renal, gestação e outras condições.
+Não defina doses sem dados suficientes e deixe claro que as sugestões não substituem o julgamento profissional. Deixe os demais campos vazios.`,
+};
 
 function responseText(payload: unknown) {
   const value = payload as {
@@ -79,6 +121,19 @@ function cleanJsonText(text: string) {
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
+}
+
+function configurationPrompt(config: ClinicalAiConfig) {
+  return `CONFIGURAÇÃO OBRIGATÓRIA DA CLÍNICA:
+- Idioma da resposta: ${config.language}.
+- Especialidade de referência: ${config.specialty || "não informada"}.
+- Nível de detalhamento: ${config.detailLevel}.
+- Formato preferencial: ${config.evolutionFormat}; preserve o formato especializado da tarefa quando ela exigir estrutura própria.
+- Sugestões de CID-10 habilitadas: ${config.suggestCid ? "sim" : "não"}.
+- Hipóteses e diferenciais habilitados: ${config.suggestDifferentials ? "sim" : "não"}.
+- Sugestões de exames habilitadas: ${config.suggestExams ? "sim" : "não"}.
+- Sugestões de conduta habilitadas: ${config.suggestConduct ? "sim" : "não"}.
+Não produza conteúdo pertencente a uma opção marcada como não.`;
 }
 
 export async function generateClinicalSuggestion(
@@ -104,7 +159,7 @@ export async function generateClinicalSuggestion(
       },
       body: JSON.stringify({
         model,
-        instructions: SYSTEM_PROMPT,
+        instructions: `${SYSTEM_PROMPT}\n\n${configurationPrompt(config)}\n\nTAREFA ESPECIALIZADA:\n${REQUEST_PROMPTS[requestType]}`,
         input: JSON.stringify({
           consultationText: input,
           requestType,
@@ -204,8 +259,15 @@ export async function generateClinicalSuggestion(
   }
   const parsed = validated.data;
   if (!config.suggestCid) parsed.cid10Suggestions = "";
-  if (!config.suggestDifferentials) parsed.differentialDiagnoses = "";
+  if (!config.suggestDifferentials) {
+    parsed.diagnosticHypotheses = "";
+    parsed.differentialDiagnoses = "";
+  }
   if (!config.suggestExams) parsed.suggestedExams = "";
-  if (!config.suggestConduct && requestType !== "soap") parsed.plan = "";
+  if (!config.suggestConduct) {
+    parsed.plan = "";
+    parsed.guidance = "";
+    parsed.followUp = "";
+  }
   return { suggestion: parsed, model };
 }

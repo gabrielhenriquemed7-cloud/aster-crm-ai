@@ -160,6 +160,8 @@ function TextAreaField({
   placeholder,
   rows = 5,
   disabled,
+  aiPending,
+  onManualEdit,
 }: {
   form: UseFormReturn<MedicalRecordFormValues>;
   name: FieldName;
@@ -167,8 +169,11 @@ function TextAreaField({
   placeholder?: string;
   rows?: number;
   disabled: boolean;
+  aiPending: boolean;
+  onManualEdit: (field: FieldName) => void;
 }) {
   const error = form.formState.errors[name]?.message;
+  const registration = form.register(name);
   return (
     <section className="rounded-xl border bg-card p-5">
       <label
@@ -183,8 +188,17 @@ function TextAreaField({
         disabled={disabled}
         placeholder={placeholder}
         className="mt-3 w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm leading-6 outline-none transition-shadow placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-70"
-        {...form.register(name)}
+        {...registration}
+        onChange={(event) => {
+          void registration.onChange(event);
+          onManualEdit(name);
+        }}
       />
+      {aiPending && (
+        <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+          Preenchido pelo ASTER Copilot — pendente de revisão
+        </p>
+      )}
       {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
     </section>
   );
@@ -229,6 +243,8 @@ export function MedicalRecordForm({
   const [returnDays, setReturnDays] = useState("30");
   const [returnDate, setReturnDate] = useState("");
   const autosaveReady = useRef(false);
+  const aiReviewPending = useRef(false);
+  const [aiPendingFields, setAiPendingFields] = useState<FieldName[]>([]);
   const [importSource, setImportSource] =
     useState<MedicalRecordHistoryItem | null>(null);
   const [selectedFields, setSelectedFields] = useState<FieldName[]>([]);
@@ -252,6 +268,8 @@ export function MedicalRecordForm({
       return false;
     }
     setSaveState("saved");
+    aiReviewPending.current = false;
+    setAiPendingFields([]);
     setLastSavedAt(new Date().toISOString());
     if (notify) toast.success(result.success);
     router.refresh();
@@ -266,6 +284,10 @@ export function MedicalRecordForm({
     // React Hook Form exposes a subscription API used here only for debounced draft persistence.
     // eslint-disable-next-line react-hooks/incompatible-library
     const subscription = form.watch(() => {
+      if (aiReviewPending.current) {
+        setSaveState("idle");
+        return;
+      }
       if (!autosaveReady.current) {
         autosaveReady.current = true;
         return;
@@ -347,6 +369,23 @@ export function MedicalRecordForm({
     );
     setSelectedFields([]);
     setImportSource(null);
+  }
+
+  function markAiFields(fields: FieldName[]) {
+    aiReviewPending.current = true;
+    setAiPendingFields((current) => [...new Set([...current, ...fields])]);
+    window.clearTimeout(
+      (window as Window & { __asterDraftTimer?: number }).__asterDraftTimer,
+    );
+    setSaveState("idle");
+  }
+
+  function markFieldReviewed(field: FieldName) {
+    setAiPendingFields((current) => {
+      const next = current.filter((item) => item !== field);
+      aiReviewPending.current = next.length > 0;
+      return next;
+    });
   }
 
   return (
@@ -599,6 +638,7 @@ export function MedicalRecordForm({
         enabled={aiEnabled}
         canEdit={canEdit}
         canManageAi={canManageAi}
+        onFieldsInserted={markAiFields}
       />
 
       <RecordDocuments appointmentId={appointment.id} canCreate={canEdit} />
@@ -848,12 +888,16 @@ export function MedicalRecordForm({
               name="allergies"
               label="Alergias"
               disabled={!canEdit}
+              aiPending={aiPendingFields.includes("allergies")}
+              onManualEdit={markFieldReviewed}
             />
             <TextAreaField
               form={form}
               name="medications"
               label="Medicamentos em uso"
               disabled={!canEdit}
+              aiPending={aiPendingFields.includes("medications")}
+              onManualEdit={markFieldReviewed}
             />
           </div>
 
@@ -862,12 +906,13 @@ export function MedicalRecordForm({
               key={section.name}
               form={form}
               disabled={!canEdit}
+              aiPending={aiPendingFields.includes(section.name)}
+              onManualEdit={markFieldReviewed}
               {...section}
             />
           ))}
         </div>
       </div>
-
     </form>
   );
 }

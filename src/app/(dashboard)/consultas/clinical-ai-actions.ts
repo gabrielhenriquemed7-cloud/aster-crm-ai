@@ -58,12 +58,15 @@ async function authContext() {
     error: null,
   } as const;
 }
-function log(error: { code?: string; message?: string }, state: {
-  hasAuthenticatedUser: boolean;
-  hasActiveClinic: boolean;
-  hasAppointment: boolean;
-  requestType: ClinicalAiRequestType;
-}) {
+function log(
+  error: { code?: string; message?: string },
+  state: {
+    hasAuthenticatedUser: boolean;
+    hasActiveClinic: boolean;
+    hasAppointment: boolean;
+    requestType: ClinicalAiRequestType;
+  },
+) {
   console.error("ASTER_COPILOT_ERROR", {
     code: error.code,
     message: error.message,
@@ -85,7 +88,12 @@ export async function generateClinicalAiSuggestion(input: unknown) {
   if (c.error) {
     log(
       { code: "AUTH_CONTEXT", message: c.error },
-      { hasAuthenticatedUser: false, hasActiveClinic: false, hasAppointment: false, requestType },
+      {
+        hasAuthenticatedUser: false,
+        hasActiveClinic: false,
+        hasAppointment: false,
+        requestType,
+      },
     );
     return { error: `AUTH_CONTEXT — ${c.error}` };
   }
@@ -99,17 +107,38 @@ export async function generateClinicalAiSuggestion(input: unknown) {
     .maybeSingle();
   if (!appointment || appointment.professional_id !== c.userId) {
     log(
-      { code: "APPOINTMENT_ACCESS", message: "Consulta ausente ou sem permissão." },
-      { hasAuthenticatedUser: true, hasActiveClinic: true, hasAppointment: Boolean(appointment), requestType },
+      {
+        code: "APPOINTMENT_ACCESS",
+        message: "Consulta ausente ou sem permissão.",
+      },
+      {
+        hasAuthenticatedUser: true,
+        hasActiveClinic: true,
+        hasAppointment: Boolean(appointment),
+        requestType,
+      },
     );
-    return { error: "APPOINTMENT_ACCESS — Você não possui acesso a esta consulta." };
+    return {
+      error: "APPOINTMENT_ACCESS — Você não possui acesso a esta consulta.",
+    };
   }
   if (appointment.status !== "in_progress") {
     log(
-      { code: "APPOINTMENT_STATUS", message: "Consulta não está em andamento." },
-      { hasAuthenticatedUser: true, hasActiveClinic: true, hasAppointment: true, requestType },
+      {
+        code: "APPOINTMENT_STATUS",
+        message: "Consulta não está em andamento.",
+      },
+      {
+        hasAuthenticatedUser: true,
+        hasActiveClinic: true,
+        hasAppointment: true,
+        requestType,
+      },
     );
-    return { error: "APPOINTMENT_STATUS — A IA só pode ser usada durante o atendimento." };
+    return {
+      error:
+        "APPOINTMENT_STATUS — A IA só pode ser usada durante o atendimento.",
+    };
   }
   const { data: settings } = await c.supabase
     .from("ai_settings")
@@ -117,7 +146,9 @@ export async function generateClinicalAiSuggestion(input: unknown) {
     .eq("clinic_id", c.clinicId)
     .maybeSingle();
   if (!settings?.enabled)
-    return { error: "AI_DISABLED — A IA Clínica está desabilitada nas configurações." };
+    return {
+      error: "AI_DISABLED — A IA Clínica está desabilitada nas configurações.",
+    };
   const [{ data: record }, { data: professional }, { data: history }] =
     await Promise.all([
       c.supabase
@@ -187,6 +218,7 @@ export async function generateClinicalAiSuggestion(input: unknown) {
         medical_record_id: record?.id ?? null,
         professional_id: c.userId,
         status,
+        request_type: requestType,
         input_hash: createHash("sha256").update(text).digest("hex"),
         model: generated.model,
         generated_sections: Object.keys(generated.suggestion).filter(
@@ -199,8 +231,16 @@ export async function generateClinicalAiSuggestion(input: unknown) {
       .single();
     if (error || !audit) {
       log(
-        { code: "AUDIT_FAILED", message: error?.message ?? "Audit unavailable" },
-        { hasAuthenticatedUser: true, hasActiveClinic: true, hasAppointment: true, requestType },
+        {
+          code: "AUDIT_FAILED",
+          message: error?.message ?? "Audit unavailable",
+        },
+        {
+          hasAuthenticatedUser: true,
+          hasActiveClinic: true,
+          hasAppointment: true,
+          requestType,
+        },
       );
       return {
         error:
@@ -218,7 +258,12 @@ export async function generateClinicalAiSuggestion(input: unknown) {
           );
     log(
       { code: clinical.code, message: clinical.message },
-      { hasAuthenticatedUser: true, hasActiveClinic: true, hasAppointment: true, requestType },
+      {
+        hasAuthenticatedUser: true,
+        hasActiveClinic: true,
+        hasAppointment: true,
+        requestType,
+      },
     );
     return { error: `${clinical.code} — ${clinical.message}` };
   }
