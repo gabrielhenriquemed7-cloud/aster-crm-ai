@@ -22,6 +22,7 @@ export const clinicalAiSuggestionSchema = z
     suggestedExams: section,
     guidance: section,
     followUp: section,
+    alertsAndMissingInformation: section,
   })
   .strict();
 

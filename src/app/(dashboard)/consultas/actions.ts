@@ -57,6 +57,7 @@ async function context() {
     supabase,
     userId: auth.user.id,
     clinicId: profile.active_clinic_id,
+    role: membership.role as string,
     error: null,
   };
 }
@@ -86,7 +87,7 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     { data: professional },
     { data: record, error: recordError },
     { data: historyRecords, error: historyError },
-    { data: aiSettings },
+    { data: aiSettings, error: aiSettingsError },
   ] = await Promise.all([
     current.supabase
       .from("profiles")
@@ -126,6 +127,15 @@ export async function getMedicalRecordPageData(appointmentId: string) {
       record: null,
       canEdit: false,
     };
+  }
+
+  if (aiSettingsError) {
+    console.error("ASTER_COPILOT_SETTINGS_ERROR", {
+      code: aiSettingsError.code,
+      message: aiSettingsError.message,
+      hasAuthenticatedUser: true,
+      hasActiveClinic: true,
+    });
   }
 
   const normalizedAppointment = {
@@ -216,6 +226,8 @@ export async function getMedicalRecordPageData(appointmentId: string) {
       appointment.status === "in_progress" &&
       (!record || record.status === "draft"),
     aiEnabled: Boolean(aiSettings?.enabled),
+    canManageAi:
+      current.role === "clinic_admin" || current.role === "platform_admin",
   };
 }
 

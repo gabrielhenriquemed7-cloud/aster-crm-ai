@@ -30,7 +30,14 @@ export function Header() {
         <div className="hidden sm:block"><ClinicSwitcher /></div>
         <SearchBar />
         <div className="ml-auto flex items-center gap-2">
-          <Button render={<Link href="/patients/new" />} className="hidden cursor-pointer md:inline-flex" size="sm" variant="secondary" aria-label="Novo paciente">
+          <Button
+            render={<Link href="/patients/new" />}
+            nativeButton={false}
+            className="hidden cursor-pointer md:inline-flex"
+            size="sm"
+            variant="secondary"
+            aria-label="Novo paciente"
+          >
             <Plus className="size-4" aria-hidden="true" />
             Novo paciente
           </Button>

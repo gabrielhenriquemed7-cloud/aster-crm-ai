@@ -5,16 +5,25 @@ import { z } from "zod";
 import {
   ClinicalAiError,
   generateClinicalSuggestion,
+  type ClinicalAiRequestType,
 } from "@/lib/ai/clinical-assistant";
 import { createClient } from "@/lib/supabase/server";
 
 const requestSchema = z.object({
   appointmentId: z.string().uuid(),
   text: z.string().trim().min(30).max(50000),
+  requestType: z.enum([
+    "structured_anamnesis",
+    "soap",
+    "hypotheses",
+    "cid10",
+    "exams",
+    "conduct",
+  ]),
 });
 const auditSchema = z.object({
   generationId: z.string().uuid(),
-  sections: z.array(z.string()).max(18),
+  sections: z.array(z.string()).max(19),
 });
 
 function age(birthDate: string | null) {
@@ -49,17 +58,16 @@ async function authContext() {
     error: null,
   } as const;
 }
-function log(
-  code: string,
-  message: string,
-  appointmentId: string,
-  hasAuthenticatedUser: boolean,
-) {
-  console.error("ASTER_CLINICAL_AI_ERROR", {
-    code,
-    message,
-    appointmentId,
-    hasAuthenticatedUser,
+function log(error: { code?: string; message?: string }, state: {
+  hasAuthenticatedUser: boolean;
+  hasActiveClinic: boolean;
+  hasAppointment: boolean;
+  requestType: ClinicalAiRequestType;
+}) {
+  console.error("ASTER_COPILOT_ERROR", {
+    code: error.code,
+    message: error.message,
+    ...state,
   });
 }
 
@@ -73,27 +81,43 @@ export async function generateClinicalAiSuggestion(input: unknown) {
           : "Dados inválidos.",
     };
   const c = await authContext();
-  if (c.error) return { error: c.error };
-  const { appointmentId, text } = parsed.data;
+  const { appointmentId, text, requestType } = parsed.data;
+  if (c.error) {
+    log(
+      { code: "AUTH_CONTEXT", message: c.error },
+      { hasAuthenticatedUser: false, hasActiveClinic: false, hasAppointment: false, requestType },
+    );
+    return { error: `AUTH_CONTEXT — ${c.error}` };
+  }
   const { data: appointment } = await c.supabase
     .from("appointments")
     .select(
-      "id,patient_id,professional_id,status,patient:patients(birth_date,gender,allergies,continuous_medications)",
+      "id,patient_id,professional_id,status,patient:patients(full_name,birth_date,gender,allergies,continuous_medications,medical_history)",
     )
     .eq("id", appointmentId)
     .eq("clinic_id", c.clinicId)
     .maybeSingle();
-  if (!appointment || appointment.professional_id !== c.userId)
-    return { error: "Você não possui acesso a esta consulta." };
-  if (appointment.status !== "in_progress")
-    return { error: "A IA só pode ser usada durante o atendimento." };
+  if (!appointment || appointment.professional_id !== c.userId) {
+    log(
+      { code: "APPOINTMENT_ACCESS", message: "Consulta ausente ou sem permissão." },
+      { hasAuthenticatedUser: true, hasActiveClinic: true, hasAppointment: Boolean(appointment), requestType },
+    );
+    return { error: "APPOINTMENT_ACCESS — Você não possui acesso a esta consulta." };
+  }
+  if (appointment.status !== "in_progress") {
+    log(
+      { code: "APPOINTMENT_STATUS", message: "Consulta não está em andamento." },
+      { hasAuthenticatedUser: true, hasActiveClinic: true, hasAppointment: true, requestType },
+    );
+    return { error: "APPOINTMENT_STATUS — A IA só pode ser usada durante o atendimento." };
+  }
   const { data: settings } = await c.supabase
     .from("ai_settings")
     .select("*")
     .eq("clinic_id", c.clinicId)
     .maybeSingle();
   if (!settings?.enabled)
-    return { error: "A IA Clínica está desabilitada nas configurações." };
+    return { error: "AI_DISABLED — A IA Clínica está desabilitada nas configurações." };
   const [{ data: record }, { data: professional }, { data: history }] =
     await Promise.all([
       c.supabase
@@ -125,12 +149,14 @@ export async function generateClinicalAiSuggestion(input: unknown) {
     const generated = await generateClinicalSuggestion(
       text,
       {
+        patientName: patient?.full_name ?? null,
         age: age(patient?.birth_date ?? null),
         gender: patient?.gender ?? null,
         allergies: record?.allergies ?? patient?.allergies ?? null,
         medications:
           record?.medications ?? patient?.continuous_medications ?? null,
         chiefComplaint: record?.chief_complaint ?? null,
+        personalHistory: patient?.medical_history ?? null,
         previousHistory: (history ?? [])
           .map((item) =>
             [item.chief_complaint, item.assessment, item.plan]
@@ -149,6 +175,7 @@ export async function generateClinicalAiSuggestion(input: unknown) {
         suggestExams: settings.suggest_exams,
         suggestConduct: settings.suggest_conduct,
       },
+      requestType,
     );
     const status = "generated";
     const { data: audit, error } = await c.supabase
@@ -172,10 +199,8 @@ export async function generateClinicalAiSuggestion(input: unknown) {
       .single();
     if (error || !audit) {
       log(
-        "AUDIT_FAILED",
-        error?.message ?? "Audit unavailable",
-        appointmentId,
-        true,
+        { code: "AUDIT_FAILED", message: error?.message ?? "Audit unavailable" },
+        { hasAuthenticatedUser: true, hasActiveClinic: true, hasAppointment: true, requestType },
       );
       return {
         error:
@@ -188,11 +213,14 @@ export async function generateClinicalAiSuggestion(input: unknown) {
       error instanceof ClinicalAiError
         ? error
         : new ClinicalAiError(
-            "CONNECTION",
+            "NETWORK_ERROR",
             "Falha inesperada no serviço de IA.",
           );
-    log(clinical.code, clinical.message, appointmentId, true);
-    return { error: clinical.message };
+    log(
+      { code: clinical.code, message: clinical.message },
+      { hasAuthenticatedUser: true, hasActiveClinic: true, hasAppointment: true, requestType },
+    );
+    return { error: `${clinical.code} — ${clinical.message}` };
   }
 }
 

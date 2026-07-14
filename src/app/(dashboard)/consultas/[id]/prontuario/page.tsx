@@ -31,6 +31,7 @@ export default async function MedicalRecordPage({
       patientDocuments={data.patientDocuments}
       canEdit={data.canEdit}
       aiEnabled={data.aiEnabled}
+      canManageAi={data.canManageAi}
     />
   );
 }

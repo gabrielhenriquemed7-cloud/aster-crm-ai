@@ -1,9 +1,19 @@
 "use client";
 
-import { Bot, Clipboard, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
-import { useState } from "react";
+import {
+  AlertTriangle,
+  Bot,
+  Clipboard,
+  Loader2,
+  RotateCcw,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import { toast } from "sonner";
+
 import {
   acceptClinicalAiSections,
   discardClinicalAiSuggestion,
@@ -21,69 +31,75 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { ClinicalAiSuggestion } from "@/lib/ai/clinical-schema";
+import type { ClinicalAiRequestType } from "@/lib/ai/clinical-assistant";
 import type { MedicalRecordFormValues } from "@/lib/medical-records/schema";
 
 type FieldName = keyof MedicalRecordFormValues;
-type Strategy = "keep" | "append" | "replace";
-const sections: Array<{
+type Section = {
   key: keyof ClinicalAiSuggestion;
   label: string;
-  field: FieldName;
-}> = [
+  field?: FieldName;
+};
+
+const sections: Section[] = [
   {
     key: "chiefComplaint",
-    label: "Motivo da consulta",
+    label: "Queixa principal",
     field: "chief_complaint",
   },
   { key: "hpi", label: "HDA", field: "hpi" },
-  { key: "personalHistory", label: "Antecedentes pessoais", field: "pmh" },
-  {
-    key: "familyHistory",
-    label: "Antecedentes familiares",
-    field: "family_history",
-  },
-  { key: "socialHistory", label: "Hábitos de vida", field: "social_history" },
-  { key: "medications", label: "Medicamentos em uso", field: "medications" },
+  { key: "personalHistory", label: "Antecedentes", field: "pmh" },
   { key: "allergies", label: "Alergias", field: "allergies" },
-  { key: "reviewOfSystems", label: "Revisão de sistemas", field: "hpi" },
-  {
-    key: "vitalSigns",
-    label: "Sinais vitais mencionados",
-    field: "vital_signs",
-  },
+  { key: "medications", label: "Medicamentos em uso", field: "medications" },
   { key: "physicalExam", label: "Exame físico", field: "physical_exam" },
-  {
-    key: "clinicalAssessment",
-    label: "Avaliação clínica",
-    field: "assessment",
-  },
+  { key: "clinicalAssessment", label: "Avaliação", field: "assessment" },
   {
     key: "diagnosticHypotheses",
     label: "Hipóteses diagnósticas",
     field: "assessment",
   },
-  {
-    key: "differentialDiagnoses",
-    label: "Diagnósticos diferenciais",
-    field: "assessment",
-  },
-  { key: "cid10Suggestions", label: "Sugestões de CID-10", field: "cid10" },
-  { key: "plan", label: "Plano / conduta", field: "plan" },
+  { key: "cid10Suggestions", label: "CID-10 sugeridos", field: "cid10" },
   { key: "suggestedExams", label: "Exames sugeridos", field: "exam_requests" },
-  { key: "guidance", label: "Orientações", field: "guidance" },
-  { key: "followUp", label: "Retorno", field: "return_guidance" },
+  { key: "plan", label: "Conduta sugerida", field: "plan" },
+  {
+    key: "alertsAndMissingInformation",
+    label: "Alertas e informações faltantes",
+  },
 ];
 
-export function ClinicalAiPanel({
+const requests: Array<{ type: ClinicalAiRequestType; label: string }> = [
+  { type: "structured_anamnesis", label: "Gerar anamnese estruturada" },
+  { type: "soap", label: "Gerar SOAP" },
+  { type: "hypotheses", label: "Sugerir hipóteses" },
+  { type: "cid10", label: "Sugerir CID-10" },
+  { type: "exams", label: "Sugerir exames" },
+  { type: "conduct", label: "Sugerir conduta" },
+];
+
+function sectionLabel(
+  section: Section,
+  requestType: ClinicalAiRequestType | null,
+) {
+  if (requestType !== "soap") return section.label;
+  if (section.key === "hpi") return "Subjetivo";
+  if (section.key === "physicalExam") return "Objetivo";
+  if (section.key === "clinicalAssessment") return "Avaliação";
+  if (section.key === "plan") return "Plano";
+  return section.label;
+}
+
+export function ClinicalAIPanel({
   appointmentId,
   form,
   enabled,
   canEdit,
+  canManageAi,
 }: {
   appointmentId: string;
   form: UseFormReturn<MedicalRecordFormValues>;
   enabled: boolean;
   canEdit: boolean;
+  canManageAi: boolean;
 }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -91,206 +107,356 @@ export function ClinicalAiPanel({
     null,
   );
   const [generationId, setGenerationId] = useState<string | null>(null);
-  const [strategies, setStrategies] = useState<Record<string, Strategy>>({});
-  const [confirmAll, setConfirmAll] = useState(false);
-  if (!enabled) return null;
-  async function generate() {
+  const [selected, setSelected] = useState<Array<keyof ClinicalAiSuggestion>>(
+    [],
+  );
+  const [lastRequest, setLastRequest] = useState<ClinicalAiRequestType | null>(
+    null,
+  );
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [conflicts, setConflicts] = useState<
+    Array<{ field: FieldName; label: string; value: string; keys: string[] }>
+  >([]);
+
+  const visibleSections = useMemo(
+    () => sections.filter((section) => suggestion?.[section.key]?.trim()),
+    [suggestion],
+  );
+
+  if (!enabled) {
+    return (
+      <Card id="aster-copilot" className="w-full border-amber-500/30 bg-amber-500/5 shadow-none">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
+          <div>
+            <p className="font-medium">
+              A IA Clínica está desabilitada para esta clínica.
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Habilite o recurso para usar o ASTER COPILOT.
+            </p>
+          </div>
+          {canManageAi && (
+            <Button
+              type="button"
+              variant="outline"
+              render={<Link href="/configuracoes/ia" />}
+              nativeButton={false}
+            >
+              Abrir configurações
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  async function generate(requestType: ClinicalAiRequestType) {
     setLoading(true);
+    setError("");
+    setSuccess("");
+    setLastRequest(requestType);
     const result = await generateClinicalAiSuggestion({
       appointmentId,
       text: input,
+      requestType,
     });
     setLoading(false);
-    if (result.error || !result.suggestion || !result.generationId)
-      return toast.error(result.error || "Resposta inválida.");
+    if (result.error || !result.suggestion || !result.generationId) {
+      setError(
+        `Não foi possível gerar a sugestão: ${result.error || "RESPOSTA_INVALIDA — Resposta inválida."}`,
+      );
+      return;
+    }
+    const available = sections
+      .filter((section) => result.suggestion?.[section.key]?.trim())
+      .map((section) => section.key);
     setSuggestion(result.suggestion);
     setGenerationId(result.generationId);
-    setStrategies({});
-    toast.success("Sugestão gerada. Revise todas as seções.");
-  }
-  function strategyFor(field: FieldName) {
-    return (
-      strategies[field] ?? (form.getValues(field)?.trim() ? "keep" : "replace")
+    setSelected(available);
+    setSuccess(
+      "Sugestão gerada com sucesso. Revise o conteúdo antes de inserir.",
     );
   }
-  function add(items: typeof sections) {
-    const accepted: string[] = [];
-    for (const item of items) {
-      const proposed = suggestion?.[item.key]?.trim();
-      if (!proposed) continue;
-      const current = form.getValues(item.field)?.trim() ?? "";
-      const strategy = strategyFor(item.field);
-      if (current && strategy === "keep") continue;
-      form.setValue(
-        item.field,
-        current && strategy === "append"
-          ? `${current}\n\n${item.label}: ${proposed}`
-          : proposed,
-        { shouldDirty: true, shouldValidate: true },
-      );
-      accepted.push(item.key);
+
+  function proposals() {
+    const grouped = new Map<
+      FieldName,
+      { labels: string[]; values: string[]; keys: string[] }
+    >();
+    for (const section of sections.filter(
+      (item) => item.field && selected.includes(item.key),
+    )) {
+      const value = suggestion?.[section.key]?.trim();
+      if (!value || !section.field) continue;
+      const current = grouped.get(section.field) ?? {
+        labels: [],
+        values: [],
+        keys: [],
+      };
+      current.labels.push(sectionLabel(section, lastRequest));
+      current.values.push(value);
+      current.keys.push(section.key);
+      grouped.set(section.field, current);
     }
-    if (!accepted.length)
-      return toast.info(
-        "Nenhuma seção foi adicionada. Ajuste as opções dos campos já preenchidos.",
+    return [...grouped.entries()].map(([field, item]) => ({
+      field,
+      label: item.labels.join(" + "),
+      value: item.values.join("\n\n"),
+      keys: item.keys,
+    }));
+  }
+
+  function insertSelected() {
+    const pending = proposals();
+    if (!pending.length)
+      return toast.error(
+        "Selecione ao menos um card que possa ser inserido no prontuário.",
       );
+    const occupied = pending.filter((item) =>
+      form.getValues(item.field)?.trim(),
+    );
+    if (occupied.length) {
+      setConflicts(pending);
+      return;
+    }
+    applyInsertion(pending);
+  }
+
+  function applyInsertion(items: ReturnType<typeof proposals>) {
+    items.forEach((item) =>
+      form.setValue(item.field, item.value, {
+        shouldDirty: true,
+        shouldValidate: true,
+      }),
+    );
+    const accepted = items.flatMap((item) => item.keys);
     if (generationId)
       void acceptClinicalAiSections({ generationId, sections: accepted });
-    toast.success(
-      `${accepted.length} seção(ões) adicionada(s) ao rascunho. Revise antes de salvar.`,
+    setConflicts([]);
+    setSuccess(
+      "Campos selecionados inseridos no rascunho. Revise antes de salvar o prontuário.",
     );
   }
+
   async function discard() {
     if (generationId) {
       const result = await discardClinicalAiSuggestion(generationId);
-      if (result.error) return toast.error(result.error);
+      if (result.error)
+        return setError(`Não foi possível descartar: ${result.error}`);
     }
     setSuggestion(null);
     setGenerationId(null);
-    setInput("");
-    toast.success("Sugestão descartada.");
+    setSelected([]);
+    setError("");
+    setSuccess("Sugestão descartada.");
   }
+
+  async function copyAll() {
+    const content = visibleSections
+      .map(
+        (section) =>
+          `${sectionLabel(section, lastRequest)}\n${suggestion?.[section.key]}`,
+      )
+      .join("\n\n");
+    try {
+      await navigator.clipboard.writeText(content);
+      setSuccess("Conteúdo copiado.");
+    } catch {
+      setError("Não foi possível copiar o conteúdo.");
+    }
+  }
+
   return (
-    <Card className="border-primary/25 shadow-none">
+    <Card id="aster-copilot" className="w-full border-primary/25 shadow-none">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Bot className="size-5 text-primary" /> IA Clínica
+          <Bot className="size-5 text-primary" /> ASTER COPILOT
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <label className="block text-sm font-medium">
-          Anotações ou transcrição da consulta
-          <textarea
-            rows={8}
-            maxLength={50000}
-            disabled={!canEdit || loading}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 font-normal leading-6 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-            placeholder="Cole a transcrição ou digite suas anotações clínicas..."
-          />
-        </label>
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            onClick={generate}
-            disabled={!canEdit || loading || input.trim().length < 30}
-          >
-            {loading ? <Loader2 className="animate-spin" /> : <Sparkles />}{" "}
-            {loading ? "Processando..." : "Gerar sugestão clínica"}
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            A IA pode cometer erros. Revise todas as informações antes de
-            adicionar ao prontuário.
+      <CardContent
+        className={
+          suggestion ? "grid items-start gap-6 lg:grid-cols-2" : "space-y-4"
+        }
+      >
+        <div className="space-y-4">
+          <label className="block text-sm font-medium">
+            Relato clínico para análise
+            <textarea
+              rows={10}
+              maxLength={50000}
+              disabled={!canEdit || loading}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 font-normal leading-6 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              placeholder="Digite ou cole aqui o relato da consulta, queixa principal, história, exame físico e demais informações relevantes."
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {requests.map((request) => (
+              <Button
+                key={request.type}
+                type="button"
+                variant={
+                  request.type === "structured_anamnesis"
+                    ? "default"
+                    : "outline"
+                }
+                disabled={!canEdit || loading || input.trim().length < 30}
+                onClick={() => generate(request.type)}
+              >
+                {loading && lastRequest === request.type ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <Sparkles />
+                )}
+                {request.label}
+              </Button>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading || (!input && !suggestion)}
+              onClick={() => {
+                setInput("");
+                setSuggestion(null);
+                setGenerationId(null);
+                setSelected([]);
+                setError("");
+                setSuccess("");
+              }}
+            >
+              <Trash2 /> Limpar
+            </Button>
+          </div>
+          {loading && (
+            <p
+              role="status"
+              className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm"
+            >
+              <Loader2 className="size-4 animate-spin" /> Analisando informações
+              clínicas...
+            </p>
+          )}
+          {error && (
+            <div
+              role="alert"
+              className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+            >
+              <p>{error}</p>
+              {lastRequest && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-2"
+                  disabled={loading}
+                  onClick={() => generate(lastRequest)}
+                >
+                  <RotateCcw /> Tentar novamente
+                </Button>
+              )}
+            </div>
+          )}
+          {success && (
+            <p
+              role="status"
+              className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300"
+            >
+              {success}
+            </p>
+          )}
+          <p className="flex gap-2 text-xs text-muted-foreground">
+            <AlertTriangle className="size-4 shrink-0" /> Conteúdo gerado por
+            IA. Revise antes de inserir no prontuário.
           </p>
         </div>
         {suggestion && (
-          <div className="space-y-3 border-t pt-4">
+          <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={() => setConfirmAll(true)}>
-                <Plus /> Adicionar tudo ao prontuário
-              </Button>
               <Button
                 type="button"
-                variant="outline"
-                onClick={() =>
-                  navigator.clipboard
-                    .writeText(
-                      sections
-                        .filter((s) => suggestion[s.key])
-                        .map((s) => `${s.label}\n${suggestion[s.key]}`)
-                        .join("\n\n"),
-                    )
-                    .then(() => toast.success("Conteúdo copiado."))
-                }
+                onClick={insertSelected}
+                disabled={!canEdit || !selected.length}
               >
-                <Clipboard /> Copiar conteúdo
+                Inserir campos selecionados no prontuário
+              </Button>
+              <Button type="button" variant="outline" onClick={copyAll}>
+                <Clipboard /> Copiar tudo
               </Button>
               <Button type="button" variant="outline" onClick={discard}>
-                <Trash2 /> Descartar sugestão
+                <Trash2 /> Descartar
               </Button>
             </div>
-            {sections.map((item) => (
-              <section key={item.key} className="rounded-xl border p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label
-                    className="text-sm font-semibold"
-                    htmlFor={`ai-${item.key}`}
-                  >
-                    {item.label}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    {form.getValues(item.field)?.trim() && (
-                      <select
-                        aria-label={`Conflito em ${item.label}`}
-                        className="rounded-md border bg-background px-2 py-1 text-xs"
-                        value={strategyFor(item.field)}
-                        onChange={(event) =>
-                          setStrategies((value) => ({
-                            ...value,
-                            [item.field]: event.target.value as Strategy,
-                          }))
-                        }
-                      >
-                        <option value="keep">Manter atual</option>
-                        <option value="append">Acrescentar sugestão</option>
-                        <option value="replace">Substituir manualmente</option>
-                      </select>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      type="button"
-                      disabled={!suggestion[item.key]?.trim()}
-                      onClick={() => add([item])}
-                    >
-                      Adicionar seção
-                    </Button>
-                  </div>
-                </div>
+            {visibleSections.map((section) => (
+              <section key={section.key} className="rounded-xl border p-4">
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(section.key)}
+                    onChange={(event) =>
+                      setSelected((current) =>
+                        event.target.checked
+                          ? [...current, section.key]
+                          : current.filter((key) => key !== section.key),
+                      )
+                    }
+                  />
+                  {sectionLabel(section, lastRequest)}
+                </label>
                 <textarea
-                  id={`ai-${item.key}`}
                   rows={3}
-                  value={suggestion[item.key]}
+                  value={suggestion[section.key]}
                   onChange={(event) =>
                     setSuggestion((current) =>
                       current
-                        ? { ...current, [item.key]: event.target.value }
+                        ? { ...current, [section.key]: event.target.value }
                         : current,
                     )
                   }
                   className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm leading-6"
-                  placeholder="Não informado na consulta."
                 />
               </section>
             ))}
+            <p className="text-xs text-muted-foreground">
+              Hipóteses a considerar e sugestões para avaliação profissional
+              necessitam correlação clínica. A IA não estabelece diagnóstico
+              definitivo.
+            </p>
           </div>
         )}
       </CardContent>
-      <Dialog open={confirmAll} onOpenChange={setConfirmAll}>
+      <Dialog
+        open={conflicts.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setConflicts([]);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Adicionar todas as seções?</DialogTitle>
+            <DialogTitle>Substituir campos preenchidos?</DialogTitle>
             <DialogDescription>
-              As sugestões serão inseridas apenas no rascunho. Campos existentes
-              seguirão a opção de conflito selecionada e nada será salvo sem sua
-              revisão.
+              Os campos abaixo já possuem conteúdo. Confirme somente se deseja
+              substituí-los pela sugestão revisada da IA.
             </DialogDescription>
           </DialogHeader>
+          <ul className="space-y-2 text-sm">
+            {conflicts
+              .filter((item) => form.getValues(item.field)?.trim())
+              .map((item) => (
+                <li key={item.field} className="rounded-lg border p-3">
+                  {item.label}
+                </li>
+              ))}
+          </ul>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
                 Cancelar
               </Button>
             </DialogClose>
-            <Button
-              type="button"
-              onClick={() => {
-                add(sections);
-                setConfirmAll(false);
-              }}
-            >
-              Confirmar adição
+            <Button type="button" onClick={() => applyInsertion(conflicts)}>
+              Confirmar substituição
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -47,7 +47,7 @@ import type {
 } from "@/lib/medical-records/types";
 import { appointmentTypeLabels } from "@/lib/appointments/types";
 import { RecordDocuments } from "@/components/clinical-documents/record-documents";
-import { ClinicalAiPanel } from "@/components/medical-records/clinical-ai-panel";
+import { ClinicalAIPanel } from "@/components/medical-records/clinical-ai-panel";
 
 type FieldName = keyof MedicalRecordFormValues;
 
@@ -197,6 +197,7 @@ export function MedicalRecordForm({
   patientDocuments,
   canEdit,
   aiEnabled,
+  canManageAi,
 }: {
   appointment: MedicalRecordAppointment;
   record: MedicalRecord | null;
@@ -211,6 +212,7 @@ export function MedicalRecordForm({
   }>;
   canEdit: boolean;
   aiEnabled: boolean;
+  canManageAi: boolean;
 }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -591,6 +593,14 @@ export function MedicalRecordForm({
         </div>
       )}
 
+      <ClinicalAIPanel
+        appointmentId={appointment.id}
+        form={form}
+        enabled={aiEnabled}
+        canEdit={canEdit}
+        canManageAi={canManageAi}
+      />
+
       <RecordDocuments appointmentId={appointment.id} canCreate={canEdit} />
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -858,12 +868,6 @@ export function MedicalRecordForm({
         </div>
       </div>
 
-      <ClinicalAiPanel
-        appointmentId={appointment.id}
-        form={form}
-        enabled={aiEnabled}
-        canEdit={canEdit}
-      />
     </form>
   );
 }
