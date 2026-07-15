@@ -13,6 +13,7 @@ const requestSchema = z.object({
   appointmentId: z.string().uuid(),
   text: z.string().trim().min(30).max(50000),
   requestType: z.enum([
+    "complete_analysis",
     "structured_anamnesis",
     "soap",
     "hypotheses",

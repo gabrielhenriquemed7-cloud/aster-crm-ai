@@ -88,6 +88,7 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     { data: record, error: recordError },
     { data: historyRecords, error: historyError },
     { data: aiSettings, error: aiSettingsError },
+    { data: longitudinalSummary },
   ] = await Promise.all([
     current.supabase
       .from("profiles")
@@ -111,6 +112,14 @@ export async function getMedicalRecordPageData(appointmentId: string) {
       .from("ai_settings")
       .select("enabled")
       .eq("clinic_id", current.clinicId)
+      .maybeSingle(),
+    current.supabase
+      .from("longitudinal_clinical_summaries")
+      .select(
+        "id,patient_id,generated_at,last_record_at,records_count,model,schema_version,summary,sources,status",
+      )
+      .eq("clinic_id", current.clinicId)
+      .eq("patient_id", appointment.patient_id)
       .maybeSingle(),
   ]);
   if (recordError || historyError) {
@@ -228,6 +237,16 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     aiEnabled: Boolean(aiSettings?.enabled),
     canManageAi:
       current.role === "clinic_admin" || current.role === "platform_admin",
+    longitudinalSummary: longitudinalSummary
+      ? {
+          ...longitudinalSummary,
+          has_new_records: (historyRecords ?? []).some(
+            (item) =>
+              !longitudinalSummary.last_record_at ||
+              item.updated_at > longitudinalSummary.last_record_at,
+          ),
+        }
+      : null,
   };
 }
 

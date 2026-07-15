@@ -28,6 +28,7 @@ export type ClinicalAiContext = {
 };
 
 export type ClinicalAiRequestType =
+  | "complete_analysis"
   | "structured_anamnesis"
   | "soap"
   | "hypotheses"
@@ -60,6 +61,15 @@ Concentre-se exclusivamente na tarefa solicitada. Não use blocos Markdown nem d
 Campos não pertinentes à tarefa devem ser string vazia. Responda somente com o objeto JSON compatível com o schema solicitado.`;
 
 const REQUEST_PROMPTS: Record<ClinicalAiRequestType, string> = {
+  complete_analysis: `Analise a consulta inteira em uma única resposta coerente e preencha todas as seções aplicáveis do schema.
+Inclua anamnese estruturada: identificação, queixa principal, HDA, interrogatório sintomatológico, antecedentes pessoais, familiares e cirúrgicos, medicamentos, alergias, hábitos, exame físico, impressão clínica e informações faltantes.
+Inclua uma evolução SOAP reconhecível: em hpi use o subtítulo "S — Subjetivo"; em physicalExam, "O — Objetivo"; em clinicalAssessment, "A — Avaliação"; e em plan, "P — Plano".
+Em diagnosticHypotheses liste até cinco hipóteses e, para cada uma, informe nome, compatibilidade qualitativa, argumentos favoráveis, argumentos contrários e dados necessários para confirmação.
+Em cid10Suggestions apresente CID principal, alternativas, justificativa e alertas de uso inadequado, sempre como sugestão.
+Em suggestedExams separe exames iniciais, conforme hipótese e conforme evolução, com prioridade e justificativa.
+Em plan, guidance e followUp separe medidas imediatas, opções não farmacológicas, possibilidades farmacológicas para avaliação, orientações, sinais de alarme, critérios de encaminhamento e internação e reavaliação.
+Em alertsAndMissingInformation liste perguntas clínicas importantes ainda não respondidas e achados de exame físico possivelmente incompletos, usando os títulos "Antes de concluir, considere perguntar:" e "Achados que podem ser importantes conforme o contexto:". Nunca transforme lacunas em fatos.
+Não duplique desnecessariamente conteúdo entre as seções e não apresente diagnóstico definitivo.`,
   structured_anamnesis: `Produza uma anamnese estruturada com linguagem médica profissional, sem diagnóstico definitivo.
 Separe claramente o relato do paciente dos achados objetivos e distribua o conteúdo assim:
 - Identificação: no início de personalHistory, com o título "Identificação", usando apenas idade e sexo/gênero disponíveis.

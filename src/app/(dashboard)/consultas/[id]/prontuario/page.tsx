@@ -32,6 +32,7 @@ export default async function MedicalRecordPage({
       canEdit={data.canEdit}
       aiEnabled={data.aiEnabled}
       canManageAi={data.canManageAi}
+      initialLongitudinalSummary={data.longitudinalSummary}
     />
   );
 }

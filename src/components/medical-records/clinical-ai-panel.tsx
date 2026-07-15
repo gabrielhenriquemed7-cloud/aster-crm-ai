@@ -21,6 +21,8 @@ import {
 } from "@/app/(dashboard)/consultas/clinical-ai-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ClinicalAudioRecorder } from "@/components/medical-records/clinical-audio-recorder";
+import { ClinicalRealtimeAssistant } from "@/components/medical-records/clinical-realtime-assistant";
 import {
   Dialog,
   DialogClose,
@@ -127,6 +129,7 @@ export function ClinicalAIPanel({
   );
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [transcriptionReady, setTranscriptionReady] = useState(false);
   const [conflicts, setConflicts] = useState<
     Array<{ field: FieldName; label: string; value: string; keys: string[] }>
   >([]);
@@ -331,12 +334,21 @@ export function ClinicalAIPanel({
           <Bot className="size-5 text-primary" /> ASTER COPILOT
         </CardTitle>
       </CardHeader>
-      <CardContent
-        className={
-          suggestion ? "grid items-start gap-6 lg:grid-cols-2" : "space-y-4"
-        }
-      >
+      <CardContent className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,0.72fr)]">
         <div className="space-y-4">
+          <ClinicalAudioRecorder
+            appointmentId={appointmentId}
+            currentText={input}
+            disabled={!canEdit || loading}
+            onApply={(text, mode) =>
+              setInput((current) =>
+                mode === "append" && current.trim()
+                  ? `${current.trim()}\n\n${text}`
+                  : text,
+              )
+            }
+            onTranscriptionComplete={() => setTranscriptionReady(true)}
+          />
           <label className="block text-sm font-medium">
             Relato clínico para análise
             <textarea
@@ -349,6 +361,39 @@ export function ClinicalAIPanel({
               placeholder="Digite ou cole aqui o relato da consulta, queixa principal, história, exame físico e demais informações relevantes."
             />
           </label>
+          {transcriptionReady && (
+            <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+              <p className="text-sm font-medium">Transcrição concluída</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Revise o relato ou gere uma análise clínica completa em uma
+                única chamada.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setTranscriptionReady(false)}
+                >
+                  Apenas revisar transcrição
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!canEdit || loading || input.trim().length < 30}
+                  onClick={() => {
+                    setTranscriptionReady(false);
+                    void generate("complete_analysis");
+                  }}
+                >
+                  {loading && lastRequest === "complete_analysis" ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Sparkles />
+                  )}
+                  Analisar consulta completa
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             {requests.map((request) => (
               <Button
@@ -428,113 +473,122 @@ export function ClinicalAIPanel({
             IA. Revise antes de inserir no prontuário.
           </p>
         </div>
-        {suggestion && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setSelected(visibleSections.map((section) => section.key))
-                }
-              >
-                Selecionar tudo
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setSelected([])}
-              >
-                Desmarcar tudo
-              </Button>
-              <Button
-                type="button"
-                onClick={insertSelected}
-                disabled={!canEdit || !selected.length}
-              >
-                Inserir campos selecionados no prontuário
-              </Button>
-              <Button type="button" variant="outline" onClick={copyAll}>
-                <Clipboard /> Copiar tudo
-              </Button>
-              <Button type="button" variant="outline" onClick={discard}>
-                <Trash2 /> Descartar resposta completa
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={loading || !lastRequest}
-                onClick={() => lastRequest && generate(lastRequest)}
-              >
-                <RotateCcw /> Regenerar
-              </Button>
-            </div>
-            {visibleSections.map((section) => (
-              <section key={section.key} className="rounded-xl border p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label className="flex items-center gap-2 text-sm font-semibold">
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(section.key)}
-                      onChange={(event) =>
-                        setSelected((current) =>
-                          event.target.checked
-                            ? [...new Set([...current, section.key])]
-                            : current.filter((key) => key !== section.key),
-                        )
-                      }
-                    />
-                    Selecionar para inserir ·{" "}
-                    {sectionLabel(section, lastRequest)}
-                  </label>
-                  <div className="flex gap-1">
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => copySection(section)}
-                    >
-                      <Clipboard /> Copiar
-                    </Button>
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => discardSection(section)}
-                    >
-                      <Trash2 /> Descartar campo
-                    </Button>
-                  </div>
-                </div>
-                <textarea
-                  rows={3}
-                  value={suggestion[section.key]}
-                  onChange={(event) =>
-                    setSuggestion((current) =>
-                      current
-                        ? { ...current, [section.key]: event.target.value }
-                        : current,
-                    )
+        <div className="space-y-4">
+          <ClinicalRealtimeAssistant
+            key={appointmentId}
+            appointmentId={appointmentId}
+            text={input}
+            enabled={canEdit}
+          />
+          {suggestion && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setSelected(visibleSections.map((section) => section.key))
                   }
-                  className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm leading-6"
-                />
-                {(section.key === "diagnosticHypotheses" ||
-                  section.key === "cid10Suggestions") && (
-                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                    Necessita correlação e validação clínica pelo profissional.
-                  </p>
-                )}
-              </section>
-            ))}
-            <p className="text-xs text-muted-foreground">
-              Hipóteses a considerar e sugestões para avaliação profissional
-              necessitam correlação clínica. A IA não estabelece diagnóstico
-              definitivo.
-            </p>
-          </div>
-        )}
+                >
+                  Selecionar tudo
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSelected([])}
+                >
+                  Desmarcar tudo
+                </Button>
+                <Button
+                  type="button"
+                  onClick={insertSelected}
+                  disabled={!canEdit || !selected.length}
+                >
+                  Inserir campos selecionados no prontuário
+                </Button>
+                <Button type="button" variant="outline" onClick={copyAll}>
+                  <Clipboard /> Copiar tudo
+                </Button>
+                <Button type="button" variant="outline" onClick={discard}>
+                  <Trash2 /> Descartar resposta completa
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={loading || !lastRequest}
+                  onClick={() => lastRequest && generate(lastRequest)}
+                >
+                  <RotateCcw /> Regenerar
+                </Button>
+              </div>
+              {visibleSections.map((section) => (
+                <section key={section.key} className="rounded-xl border p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 text-sm font-semibold">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(section.key)}
+                        onChange={(event) =>
+                          setSelected((current) =>
+                            event.target.checked
+                              ? [...new Set([...current, section.key])]
+                              : current.filter((key) => key !== section.key),
+                          )
+                        }
+                      />
+                      Selecionar para inserir ·{" "}
+                      {sectionLabel(section, lastRequest)}
+                    </label>
+                    <div className="flex gap-1">
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => copySection(section)}
+                      >
+                        <Clipboard /> Copiar
+                      </Button>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => discardSection(section)}
+                      >
+                        <Trash2 /> Descartar campo
+                      </Button>
+                    </div>
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={suggestion[section.key]}
+                    onChange={(event) =>
+                      setSuggestion((current) =>
+                        current
+                          ? { ...current, [section.key]: event.target.value }
+                          : current,
+                      )
+                    }
+                    className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm leading-6"
+                  />
+                  {(section.key === "diagnosticHypotheses" ||
+                    section.key === "cid10Suggestions") && (
+                    <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                      Necessita correlação e validação clínica pelo
+                      profissional.
+                    </p>
+                  )}
+                </section>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                Hipóteses a considerar e sugestões para avaliação profissional
+                necessitam correlação clínica. A IA não estabelece diagnóstico
+                definitivo.
+              </p>
+            </div>
+          )}
+        </div>
       </CardContent>
       <Dialog
         open={conflicts.length > 0}

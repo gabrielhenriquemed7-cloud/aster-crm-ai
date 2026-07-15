@@ -48,6 +48,8 @@ import type {
 import { appointmentTypeLabels } from "@/lib/appointments/types";
 import { RecordDocuments } from "@/components/clinical-documents/record-documents";
 import { ClinicalAIPanel } from "@/components/medical-records/clinical-ai-panel";
+import { LongitudinalClinicalSummary } from "@/components/medical-records/longitudinal-clinical-summary";
+import type { StoredLongitudinalSummary } from "@/lib/ai/longitudinal-schema";
 
 type FieldName = keyof MedicalRecordFormValues;
 
@@ -212,6 +214,7 @@ export function MedicalRecordForm({
   canEdit,
   aiEnabled,
   canManageAi,
+  initialLongitudinalSummary,
 }: {
   appointment: MedicalRecordAppointment;
   record: MedicalRecord | null;
@@ -227,6 +230,7 @@ export function MedicalRecordForm({
   canEdit: boolean;
   aiEnabled: boolean;
   canManageAi: boolean;
+  initialLongitudinalSummary: StoredLongitudinalSummary | null;
 }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -631,6 +635,11 @@ export function MedicalRecordForm({
           )}
         </div>
       )}
+
+      <LongitudinalClinicalSummary
+        patientId={appointment.patient_id}
+        initialSummary={initialLongitudinalSummary}
+      />
 
       <ClinicalAIPanel
         appointmentId={appointment.id}
