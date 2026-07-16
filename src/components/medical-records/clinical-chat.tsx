@@ -6,6 +6,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { askClinicalCopilot } from "@/app/(dashboard)/consultas/clinical-chat-actions";
 import { Button } from "@/components/ui/button";
 import type { RealtimeClinicalAnalysis } from "@/lib/ai/clinical-realtime-schema";
+import type { ClinicalTimelineEvent } from "@/lib/ai/clinical-timeline-schema";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -98,10 +99,12 @@ export function ClinicalChat({
   appointmentId,
   clinicalText,
   assistance,
+  timelineEvents,
 }: {
   appointmentId: string;
   clinicalText: string;
   assistance: RealtimeClinicalAnalysis;
+  timelineEvents: ClinicalTimelineEvent[];
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState("");
@@ -120,6 +123,16 @@ export function ClinicalChat({
   }, [messages.length]);
 
   useEffect(() => {
+    const receiveQuestion = (event: Event) => {
+      const questionEvent = event as CustomEvent<string>;
+      if (questionEvent.detail) setQuestion(questionEvent.detail);
+    };
+    window.addEventListener("aster:chat-question", receiveQuestion);
+    return () =>
+      window.removeEventListener("aster:chat-question", receiveQuestion);
+  }, []);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, loading]);
 
@@ -136,6 +149,7 @@ export function ClinicalChat({
       question: value,
       clinicalText,
       assistance,
+      timelineEvents,
       history,
     });
     setLoading(false);
@@ -161,7 +175,9 @@ export function ClinicalChat({
       <div className="max-h-[55vh] space-y-3 overflow-y-auto pr-1">
         {!messages.length && (
           <p className="text-sm text-muted-foreground">
-            Faça uma pergunta sobre o contexto da consulta atual.
+            {clinicalText.trim()
+              ? "Faça uma pergunta sobre o contexto da consulta atual."
+              : "Adicione contexto clínico para iniciar a conversa."}
           </p>
         )}
         {messages.map((message, index) => (

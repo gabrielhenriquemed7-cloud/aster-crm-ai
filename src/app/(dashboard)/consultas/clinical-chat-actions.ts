@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import { realtimeClinicalAnalysisSchema } from "@/lib/ai/clinical-realtime-schema";
+import { clinicalTimelineEventSchema } from "@/lib/ai/clinical-timeline-schema";
 import { createClient } from "@/lib/supabase/server";
 
 const messageSchema = z.object({
@@ -15,6 +16,7 @@ const inputSchema = z.object({
   question: z.string().trim().min(2).max(5000),
   clinicalText: z.string().trim().max(50000),
   assistance: realtimeClinicalAnalysisSchema,
+  timelineEvents: z.array(clinicalTimelineEventSchema).max(300),
   history: z.array(messageSchema).max(20),
 });
 
@@ -123,9 +125,11 @@ Responda em Markdown conciso. Você pode usar listas, tabelas, checklists, alert
           currentConsultationContext: {
             clinicalReportAndTranscription: parsed.data.clinicalText || null,
             currentHypotheses: parsed.data.assistance.hypotheses,
-            pendingQuestions: parsed.data.assistance.questions,
+            pendingQuestions: parsed.data.assistance.missingQuestions,
             warningSigns: parsed.data.assistance.alerts,
-            suggestedPhysicalExam: parsed.data.assistance.physicalExam,
+            timelineEvents: parsed.data.timelineEvents,
+            suggestedPhysicalExam:
+              parsed.data.assistance.physicalExamSuggestions,
             age: age(patient?.birth_date ?? null),
             sexOrGender: patient?.gender || null,
             registeredAllergies: patient?.allergies || null,

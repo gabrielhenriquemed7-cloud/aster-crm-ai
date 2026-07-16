@@ -1,8 +1,30 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+
+@keyframes ai-field-highlight {
+  0% {
+    background-color: color-mix(in oklab, var(--primary) 22%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--primary) 28%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
+
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -51,13 +73,22 @@
 }
 
 @media print {
-  @page { size: A4; margin: 0; }
-  body { background: white !important; }
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  body {
+    background: white !important;
+  }
 }
 
 :root {
-  --font-aster-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-aster-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-aster-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --font-aster-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.129 0.042 264.695);
   --surface: oklch(0.986 0.009 247.901);

@@ -13,6 +13,19 @@ const inputSchema = z.object({
   appointmentId: z.string().uuid(),
   delta: z.string().trim().min(3).max(12000),
   previous: realtimeClinicalAnalysisSchema.nullable(),
+  currentRecord: z.object({
+    chiefComplaint: z.string().max(12000),
+    hpi: z.string().max(12000),
+    history: z.string().max(12000),
+    allergies: z.string().max(12000),
+    medications: z.string().max(12000),
+    vitalSigns: z.string().max(12000),
+    physicalExam: z.string().max(12000),
+  }),
+  professionalContext: z.object({
+    answeredQuestions: z.array(z.string().max(500)).max(30),
+    discardedHypotheses: z.array(z.string().max(500)).max(20),
+  }),
 });
 
 function extractText(payload: unknown) {
@@ -49,7 +62,7 @@ export async function analyzeClinicalContextIncrement(input: unknown): Promise<{
   const { data: appointment } = await supabase
     .from("appointments")
     .select(
-      "id,patient_id,professional_id,status,patient:patients(allergies,continuous_medications,medical_history)",
+      "id,patient_id,professional_id,status,patient:patients(birth_date,gender,allergies,continuous_medications,medical_history)",
     )
     .eq("id", parsed.data.appointmentId)
     .eq("clinic_id", profile.active_clinic_id)
@@ -60,30 +73,38 @@ export async function analyzeClinicalContextIncrement(input: unknown): Promise<{
     appointment.status !== "in_progress"
   )
     return { error: "A assistência está disponível apenas na consulta ativa." };
-  const [{ data: settings }, { data: lastRecord }] = await Promise.all([
-    supabase
-      .from("ai_settings")
-      .select("enabled,language,default_specialty")
-      .eq("clinic_id", profile.active_clinic_id)
-      .maybeSingle(),
-    supabase
-      .from("medical_records")
-      .select("created_at")
-      .eq("clinic_id", profile.active_clinic_id)
-      .eq("patient_id", appointment.patient_id)
-      .neq("appointment_id", appointment.id)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const [{ data: settings }, { data: lastRecord }, { data: longitudinal }] =
+    await Promise.all([
+      supabase
+        .from("ai_settings")
+        .select("enabled,language,default_specialty")
+        .eq("clinic_id", profile.active_clinic_id)
+        .maybeSingle(),
+      supabase
+        .from("medical_records")
+        .select("created_at")
+        .eq("clinic_id", profile.active_clinic_id)
+        .eq("patient_id", appointment.patient_id)
+        .neq("appointment_id", appointment.id)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("longitudinal_clinical_summaries")
+        .select("summary,status")
+        .eq("clinic_id", profile.active_clinic_id)
+        .eq("patient_id", appointment.patient_id)
+        .in("status", ["ready", "partial"])
+        .maybeSingle(),
+    ]);
   if (!settings?.enabled) return { error: "A IA Clínica está desabilitada." };
   const key = process.env.OPENAI_API_KEY;
   if (!key) return { error: "Serviço de IA não configurado." };
   const patient = Array.isArray(appointment.patient)
     ? appointment.patient[0]
     : appointment.patient;
-  const model = process.env.OPENAI_CLINICAL_MODEL || "gpt-4.1-mini";
+  const model = process.env.OPENAI_REALTIME_CLINICAL_MODEL || "gpt-4.1-mini";
   try {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -94,23 +115,32 @@ export async function analyzeClinicalContextIncrement(input: unknown): Promise<{
       body: JSON.stringify({
         model,
         instructions: `Você é um copiloto clínico assistivo acompanhando uma consulta em andamento.
-Atualize somente: hipóteses a considerar, perguntas ainda relevantes, exame físico sugerido, sinais de alerta e dados importantes já registrados.
-Nunca gere SOAP, anamnese, CID-10, prescrição ou conduta. Nunca afirme diagnóstico definitivo, nunca use porcentagens e nunca invente perguntas sem relação com o contexto recebido.
-Hipóteses devem usar apenas compatibilidade Alta, Moderada ou Baixa. Alertas devem aparecer somente quando sustentados pelo relato. Exames físicos devem ser contextuais.
-Use o estado anterior como cache e o trecho novo como atualização. Remova itens que deixaram de ser pertinentes. Responda apenas no schema JSON.`,
+Não invente dados. Reconheça negações e o escopo da frase: "nega dor torácica" nunca é evidência de dor torácica. Separe fatos registrados, hipóteses e sugestões e informe incertezas.
+Não confirme diagnósticos, não prescreva, não interprete sugestão antiga como fato, não esconda sinais de alarme e não substitua julgamento profissional. Use linguagem objetiva e clínica.
+Alertas exigem evidência concreta e contextual, nunca palavra isolada. Inclua evidência, confirmação necessária e avaliação sugerida, sem afirmar diagnóstico.
+Hipóteses não usam porcentagens. Compare com o estado anterior e marque situação nova, mantida, menos provável ou removida. Não reintroduza hipótese descartada pelo profissional.
+Perguntas devem ser contextuais, categorizadas e removidas quando o novo contexto já trouxer resposta. Exame físico nunca deve ser descrito como realizado.
+Sugira poucos exames complementares com finalidade, condição de indicação e motivo para não solicitar quando aplicável. Nunca crie solicitação.
+Protocolos são apenas potencialmente aplicáveis e limitados a: sepse, síndrome coronariana aguda, AVC, crise asmática, anafilaxia, trauma, dor abdominal aguda, síndrome febril, risco de suicídio e emergência hipertensiva. Não execute protocolo.
+Use o estado anterior como cache e o trecho novo como atualização. Retorne listas vazias quando não houver suporte contextual. Responda somente no schema JSON, sem Markdown.`,
         input: JSON.stringify({
           newContextOnly: parsed.data.delta,
           previousAssistantState: parsed.data.previous,
+          currentMedicalRecord: parsed.data.currentRecord,
+          professionalContext: parsed.data.professionalContext,
           availablePatientData: {
+            ageOrBirthDate: patient?.birth_date || null,
+            sexOrGender: patient?.gender || null,
             allergies: patient?.allergies || null,
             medications: patient?.continuous_medications || null,
             medicalHistory: patient?.medical_history || null,
             lastConsultationAt: lastRecord?.created_at || null,
           },
+          longitudinalSummary: longitudinal?.summary || null,
           specialty: settings.default_specialty || null,
           language: settings.language || "pt-BR",
         }),
-        max_output_tokens: 1800,
+        max_output_tokens: 5000,
         text: {
           format: {
             type: "json_schema",
@@ -144,8 +174,22 @@ Use o estado anterior como cache e o trecho novo como atualização. Remova iten
       appointmentId: appointment.id,
       clinicId: profile.active_clinic_id,
       analysisType: "incremental_assistance",
+      requestedBy: auth.user.id,
+      model,
       durationMs: Date.now() - startedAt,
       tokens: payload.usage?.total_tokens ?? null,
+      status: "success",
+      itemCounts: {
+        alerts: result.data.alerts.length,
+        hypotheses: result.data.hypotheses.length,
+        missingQuestions: result.data.missingQuestions.length,
+        physicalExamSuggestions: result.data.physicalExamSuggestions.length,
+        testSuggestions: result.data.testSuggestions.length,
+        importantPatientData: result.data.importantPatientData.length,
+        possibleProtocols: result.data.possibleProtocols.length,
+        contradictions: result.data.contradictions.length,
+      },
+      analyzedAt: new Date().toISOString(),
     });
     return { analysis: result.data };
   } catch (error) {
@@ -153,7 +197,10 @@ Use o estado anterior como cache e o trecho novo como atualização. Remova iten
       appointmentId: appointment.id,
       clinicId: profile.active_clinic_id,
       analysisType: "incremental_assistance",
+      requestedBy: auth.user.id,
+      model,
       durationMs: Date.now() - startedAt,
+      status: "error",
       code: error instanceof Error ? error.name : "UNKNOWN",
     });
     return { error: "Não foi possível atualizar a assistência clínica." };

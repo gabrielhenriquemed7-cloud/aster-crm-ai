@@ -10,7 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -43,6 +43,63 @@ type Section = {
   label: string;
   field?: FieldName;
 };
+
+type FormBinding = {
+  field: FieldName;
+  value: string;
+};
+
+function joinSections(
+  entries: Array<[label: string, value: string | undefined]>,
+) {
+  return entries
+    .filter((entry): entry is [string, string] => Boolean(entry[1]?.trim()))
+    .map(([label, value]) => `${label}\n${value.trim()}`)
+    .join("\n\n");
+}
+
+function formBindings(
+  requestType: ClinicalAiRequestType,
+  suggestion: ClinicalAiSuggestion,
+): FormBinding[] {
+  if (requestType === "soap") {
+    return [
+      { field: "hpi", value: suggestion.hpi.trim() },
+      { field: "physical_exam", value: suggestion.physicalExam.trim() },
+      { field: "assessment", value: suggestion.clinicalAssessment.trim() },
+      { field: "plan", value: suggestion.plan.trim() },
+    ];
+  }
+
+  if (requestType === "structured_anamnesis") {
+    return [
+      { field: "chief_complaint", value: suggestion.chiefComplaint.trim() },
+      {
+        field: "hpi",
+        value: joinSections([
+          ["HMA/HDA", suggestion.hpi],
+          ["Revisão de sistemas", suggestion.reviewOfSystems],
+        ]),
+      },
+      { field: "pmh", value: suggestion.personalHistory.trim() },
+      { field: "medications", value: suggestion.medications.trim() },
+      { field: "allergies", value: suggestion.allergies.trim() },
+      { field: "social_history", value: suggestion.socialHistory.trim() },
+      { field: "family_history", value: suggestion.familyHistory.trim() },
+      { field: "physical_exam", value: suggestion.physicalExam.trim() },
+      {
+        field: "assessment",
+        value: joinSections([
+          ["Hipóteses", suggestion.diagnosticHypotheses],
+          ["Impressão clínica", suggestion.clinicalAssessment],
+        ]),
+      },
+      { field: "plan", value: suggestion.plan.trim() },
+    ];
+  }
+
+  return [];
+}
 
 const sections: Section[] = [
   {
@@ -107,6 +164,9 @@ export function ClinicalAIPanel({
   canEdit,
   canManageAi,
   onFieldsInserted,
+  documents,
+  patientAge,
+  patientGender,
 }: {
   appointmentId: string;
   form: UseFormReturn<MedicalRecordFormValues>;
@@ -114,7 +174,12 @@ export function ClinicalAIPanel({
   canEdit: boolean;
   canManageAi: boolean;
   onFieldsInserted: (fields: FieldName[]) => void;
+  documents: ReactNode;
+  patientAge: number | null;
+  patientGender: string | null;
 }) {
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [sourceHighlighted, setSourceHighlighted] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<ClinicalAiSuggestion | null>(
@@ -141,6 +206,29 @@ export function ClinicalAIPanel({
     () => sections.filter((section) => suggestion?.[section.key]?.trim()),
     [suggestion],
   );
+
+  useEffect(() => {
+    const showSource = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          sourceStart: number | null;
+          sourceEnd: number | null;
+        }>
+      ).detail;
+      if (detail.sourceStart === null || !inputRef.current) return;
+      inputRef.current.focus();
+      inputRef.current.setSelectionRange(
+        detail.sourceStart,
+        detail.sourceEnd ?? detail.sourceStart,
+      );
+      inputRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      setSourceHighlighted(true);
+      window.setTimeout(() => setSourceHighlighted(false), 2200);
+    };
+    window.addEventListener("aster:timeline-source", showSource);
+    return () =>
+      window.removeEventListener("aster:timeline-source", showSource);
+  }, []);
 
   if (!enabled) {
     return (
@@ -195,8 +283,43 @@ export function ClinicalAIPanel({
     setSuggestion(result.suggestion);
     setGenerationId(result.generationId);
     setSelected(available);
+    const bindings = formBindings(requestType, result.suggestion);
+    const availableBindings = bindings.filter(
+      ({ field }) => !form.getValues(field)?.trim(),
+    );
+    const occupiedBindings = bindings.filter(({ field, value }) =>
+      Boolean(value && form.getValues(field)?.trim()),
+    );
+    availableBindings.forEach(({ field, value }) => {
+      form.setValue(field, value, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    });
+    const filledFields = availableBindings
+      .filter(({ value }) => Boolean(value))
+      .map(({ field }) => field);
+    if (filledFields.length) onFieldsInserted(filledFields);
+    if (occupiedBindings.length) {
+      setConflicts(
+        occupiedBindings.map(({ field, value }) => ({
+          field,
+          label:
+            sections.find((section) => section.field === field)?.label ?? field,
+          value,
+          keys: [],
+        })),
+      );
+      setResolutions(
+        Object.fromEntries(
+          occupiedBindings.map(({ field }) => [field, "keep"]),
+        ),
+      );
+    }
     setSuccess(
-      "Sugestão gerada com sucesso. Revise o conteúdo antes de inserir.",
+      bindings.length
+        ? "Sugestão gerada e distribuída automaticamente no formulário. Revise e salve o prontuário."
+        : "Sugestão gerada com sucesso. Revise o conteúdo antes de inserir.",
     );
   }
 
@@ -334,151 +457,217 @@ export function ClinicalAIPanel({
           <Bot className="size-5 text-primary" /> ASTER COPILOT
         </CardTitle>
       </CardHeader>
-      <CardContent className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,0.72fr)]">
-        <div className="space-y-4">
-          <ClinicalAudioRecorder
-            appointmentId={appointmentId}
-            currentText={input}
-            disabled={!canEdit || loading}
-            onApply={(text, mode) =>
-              setInput((current) =>
-                mode === "append" && current.trim()
-                  ? `${current.trim()}\n\n${text}`
-                  : text,
-              )
-            }
-            onTranscriptionComplete={() => setTranscriptionReady(true)}
-          />
-          <label className="block text-sm font-medium">
-            Relato clínico para análise
-            <textarea
-              rows={10}
-              maxLength={50000}
+      <CardContent className="grid min-w-0 items-start gap-4 overflow-x-hidden px-3 sm:px-5">
+        <details open className="min-w-0 rounded-xl border bg-muted/15 p-3">
+          <summary className="cursor-pointer text-sm font-semibold">
+            Captura e análise da consulta
+          </summary>
+          <div className="mt-4 min-w-0 space-y-4">
+            <ClinicalAudioRecorder
+              appointmentId={appointmentId}
+              currentText={input}
               disabled={!canEdit || loading}
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              className="mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 font-normal leading-6 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-              placeholder="Digite ou cole aqui o relato da consulta, queixa principal, história, exame físico e demais informações relevantes."
+              onApply={(text, mode) =>
+                setInput((current) =>
+                  mode === "append" && current.trim()
+                    ? `${current.trim()}\n\n${text}`
+                    : text,
+                )
+              }
+              onTranscriptionComplete={() => setTranscriptionReady(true)}
             />
-          </label>
-          {transcriptionReady && (
-            <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
-              <p className="text-sm font-medium">Transcrição concluída</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Revise o relato ou gere uma análise clínica completa em uma
-                única chamada.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
+            <label className="block text-sm font-medium">
+              Relato clínico para análise
+              <textarea
+                ref={inputRef}
+                id="clinical-report-source"
+                rows={10}
+                maxLength={50000}
+                disabled={!canEdit || loading}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                className={`mt-2 w-full resize-y rounded-lg border bg-background px-3 py-2 font-normal leading-6 outline-none transition-shadow focus-visible:ring-3 focus-visible:ring-ring/50 ${sourceHighlighted ? "ring-4 ring-primary/40" : ""}`}
+                placeholder="Digite ou cole aqui o relato da consulta, queixa principal, história, exame físico e demais informações relevantes."
+              />
+            </label>
+            {transcriptionReady && (
+              <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+                <p className="text-sm font-medium">Transcrição concluída</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Revise o relato ou gere uma análise clínica completa em uma
+                  única chamada.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setTranscriptionReady(false)}
+                  >
+                    Apenas revisar transcrição
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!canEdit || loading || input.trim().length < 30}
+                    onClick={() => {
+                      setTranscriptionReady(false);
+                      void generate("complete_analysis");
+                    }}
+                  >
+                    {loading && lastRequest === "complete_analysis" ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Sparkles />
+                    )}
+                    Analisar consulta completa
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {requests.map((request) => (
                 <Button
+                  key={request.type}
                   type="button"
-                  variant="outline"
-                  onClick={() => setTranscriptionReady(false)}
-                >
-                  Apenas revisar transcrição
-                </Button>
-                <Button
-                  type="button"
+                  variant={
+                    request.type === "structured_anamnesis"
+                      ? "default"
+                      : "outline"
+                  }
                   disabled={!canEdit || loading || input.trim().length < 30}
-                  onClick={() => {
-                    setTranscriptionReady(false);
-                    void generate("complete_analysis");
-                  }}
+                  onClick={() => generate(request.type)}
                 >
-                  {loading && lastRequest === "complete_analysis" ? (
+                  {loading && lastRequest === request.type ? (
                     <Loader2 className="animate-spin" />
                   ) : (
                     <Sparkles />
                   )}
-                  Analisar consulta completa
+                  {request.label}
                 </Button>
-              </div>
-            </div>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {requests.map((request) => (
+              ))}
               <Button
-                key={request.type}
                 type="button"
-                variant={
-                  request.type === "structured_anamnesis"
-                    ? "default"
-                    : "outline"
-                }
-                disabled={!canEdit || loading || input.trim().length < 30}
-                onClick={() => generate(request.type)}
+                variant="outline"
+                disabled={loading || (!input && !suggestion)}
+                onClick={() => {
+                  setInput("");
+                  setSuggestion(null);
+                  setGenerationId(null);
+                  setSelected([]);
+                  setError("");
+                  setSuccess("");
+                }}
               >
-                {loading && lastRequest === request.type ? (
-                  <Loader2 className="animate-spin" />
-                ) : (
-                  <Sparkles />
-                )}
-                {request.label}
+                <Trash2 /> Limpar
               </Button>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              disabled={loading || (!input && !suggestion)}
-              onClick={() => {
-                setInput("");
-                setSuggestion(null);
-                setGenerationId(null);
-                setSelected([]);
-                setError("");
-                setSuccess("");
-              }}
-            >
-              <Trash2 /> Limpar
-            </Button>
-          </div>
-          {loading && (
-            <p
-              role="status"
-              className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm"
-            >
-              <Loader2 className="size-4 animate-spin" /> Analisando informações
-              clínicas...
-            </p>
-          )}
-          {error && (
-            <div
-              role="alert"
-              className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
-            >
-              <p>{error}</p>
-              {lastRequest && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="mt-2"
-                  disabled={loading}
-                  onClick={() => generate(lastRequest)}
-                >
-                  <RotateCcw /> Tentar novamente
-                </Button>
-              )}
             </div>
-          )}
-          {success && (
-            <p
-              role="status"
-              className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300"
-            >
-              {success}
+            {loading && (
+              <p
+                role="status"
+                className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm"
+              >
+                <Loader2 className="size-4 animate-spin" /> Analisando
+                informações clínicas...
+              </p>
+            )}
+            {error && (
+              <div
+                role="alert"
+                className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+              >
+                <p>{error}</p>
+                {lastRequest && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-2"
+                    disabled={loading}
+                    onClick={() => generate(lastRequest)}
+                  >
+                    <RotateCcw /> Tentar novamente
+                  </Button>
+                )}
+              </div>
+            )}
+            {success && (
+              <p
+                role="status"
+                className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300"
+              >
+                {success}
+              </p>
+            )}
+            <p className="flex gap-2 text-xs text-muted-foreground">
+              <AlertTriangle className="size-4 shrink-0" /> Conteúdo gerado por
+              IA. Revise antes de inserir no prontuário.
             </p>
-          )}
-          <p className="flex gap-2 text-xs text-muted-foreground">
-            <AlertTriangle className="size-4 shrink-0" /> Conteúdo gerado por
-            IA. Revise antes de inserir no prontuário.
-          </p>
-        </div>
-        <div className="space-y-4">
+          </div>
+        </details>
+        <div className="min-w-0 space-y-4">
           <ClinicalRealtimeAssistant
             key={appointmentId}
             appointmentId={appointmentId}
             text={input}
             enabled={canEdit}
+            getFormValues={() => form.getValues()}
+            clinicalSuggestion={suggestion}
+            onInsertPrescription={(value) => {
+              const current = form.getValues("prescription")?.trim();
+              form.setValue(
+                "prescription",
+                current ? `${current}\n\n${value}` : value,
+                { shouldDirty: true, shouldValidate: true },
+              );
+              onFieldsInserted(["prescription"]);
+              setSuccess(
+                "Prescrição inserida no formulário. Revise antes de salvar ou emitir qualquer documento.",
+              );
+            }}
+            onInsertExamRequests={(value) => {
+              const current = form.getValues("exam_requests")?.trim();
+              form.setValue(
+                "exam_requests",
+                current ? `${current}\n\n${value}` : value,
+                { shouldDirty: true, shouldValidate: true },
+              );
+              onFieldsInserted(["exam_requests"]);
+              setSuccess(
+                "Exames levados para o formulário. Revise antes de salvar ou solicitar.",
+              );
+            }}
+            onRecordPhysicalFinding={(value) => {
+              const current = form.getValues("physical_exam")?.trim();
+              form.setValue(
+                "physical_exam",
+                current ? `${current}\n${value}` : value,
+                { shouldDirty: true, shouldValidate: true },
+              );
+              onFieldsInserted(["physical_exam"]);
+              setSuccess(
+                "Achado inserido no exame físico. Revise antes de salvar.",
+              );
+            }}
+            onInsertTimeline={(field, value) => {
+              const current = form.getValues(field)?.trim();
+              if (
+                current &&
+                !window.confirm(
+                  "Este campo já possui conteúdo. Deseja acrescentar o evento ao final?",
+                )
+              )
+                return;
+              form.setValue(field, current ? `${current}\n\n${value}` : value, {
+                shouldDirty: true,
+                shouldValidate: true,
+              });
+              onFieldsInserted([field]);
+              setSuccess(
+                "Evento levado ao formulário em memória. Revise antes de salvar.",
+              );
+            }}
+            documents={documents}
+            patientAge={patientAge}
+            patientGender={patientGender}
           />
           {suggestion && (
             <div className="space-y-3">

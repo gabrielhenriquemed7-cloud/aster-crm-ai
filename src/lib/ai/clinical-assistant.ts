@@ -83,9 +83,11 @@ Separe claramente o relato do paciente dos achados objetivos e distribua o conte
 - Hábitos de vida: socialHistory.
 - Sinais vitais: vitalSigns.
 - Exame físico: physicalExam.
+- Hipóteses: diagnosticHypotheses, somente quando sustentadas pelo relato.
 - Impressão clínica: clinicalAssessment, como síntese provisória.
+- Plano: plan, somente com condutas presentes no relato ou sugestões claramente qualificadas para revisão profissional.
 - Informações faltantes: alertsAndMissingInformation.
-Nesta tarefa, quando uma seção clínica solicitada não tiver dado disponível, escreva "Não informado" no campo correspondente. Deixe vazios somente os campos do schema que não pertencem à anamnese.`,
+Nesta tarefa, quando uma seção clínica solicitada não tiver dado disponível, deixe o campo correspondente vazio. Não invente nem complete informações ausentes. Deixe vazios também os campos do schema que não pertencem à anamnese.`,
   soap: `Produza exatamente uma evolução SOAP médica, usando somente quatro campos principais:
 - S — SUBJETIVO em hpi: queixa principal, sintomas, duração, evolução, negativas relevantes, antecedentes, medicamentos e alergias informados.
 - O — OBJETIVO em physicalExam: sinais vitais, exame físico e exames complementares disponíveis. Não invente achados e mantenha vitalSigns vazio para evitar duplicação.

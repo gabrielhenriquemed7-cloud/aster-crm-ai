@@ -10,7 +10,9 @@ import {
   Flag,
   Loader2,
   Save,
+  Sparkles,
   Stethoscope,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -177,7 +179,13 @@ function TextAreaField({
   const error = form.formState.errors[name]?.message;
   const registration = form.register(name);
   return (
-    <section className="rounded-xl border bg-card p-5">
+    <section
+      className={`scroll-mt-6 rounded-xl border bg-card p-5 transition-[background-color,box-shadow] duration-500 ${
+        aiPending
+          ? "bg-primary/5 ring-2 ring-primary/35 animate-[ai-field-highlight_2s_ease-out]"
+          : ""
+      }`}
+    >
       <label
         className="text-sm font-semibold uppercase tracking-wide"
         htmlFor={name}
@@ -252,6 +260,7 @@ export function MedicalRecordForm({
   const [importSource, setImportSource] =
     useState<MedicalRecordHistoryItem | null>(null);
   const [selectedFields, setSelectedFields] = useState<FieldName[]>([]);
+  const [copilotMobileOpen, setCopilotMobileOpen] = useState(false);
   const form = useForm<MedicalRecordFormValues>({
     resolver: zodResolver(medicalRecordSchema),
     defaultValues: initialValues(record, appointment),
@@ -549,378 +558,447 @@ export function MedicalRecordForm({
         </div>
       )}
 
-      <Card className="gap-4 shadow-none">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Stethoscope className="size-5 text-primary" />{" "}
-            {patient?.full_name ?? "Paciente"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <p className="text-xs text-muted-foreground">Nome social</p>
-            <p className="mt-1 font-medium">
-              {patient?.social_name || "Não informado"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Idade</p>
-            <p className="mt-1 font-medium">
-              {age === null ? "Não informada" : `${age} anos`}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">CPF</p>
-            <p className="mt-1 font-medium">
-              {maskedCpf(patient?.cpf ?? null)}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Sexo/gênero</p>
-            <p className="mt-1 font-medium">
-              {patient?.gender || "Não informado"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Telefone</p>
-            <p className="mt-1 font-medium">
-              {patient?.phone || "Não informado"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Convênio</p>
-            <p className="mt-1 font-medium">
-              {patient?.insurance || "Não informado"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Profissional</p>
-            <p className="mt-1 font-medium">
-              {appointment.professional?.full_name || "Não informado"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Tipo</p>
-            <p className="mt-1 font-medium">
-              {appointmentTypeLabels[appointment.appointment_type]} ·{" "}
-              {history.length
-                ? "Paciente em acompanhamento"
-                : "Primeira consulta registrada"}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      <Button
+        type="button"
+        className="fixed right-4 bottom-4 z-40 shadow-lg min-[1100px]:hidden"
+        onClick={() => setCopilotMobileOpen(true)}
+      >
+        <Sparkles /> Abrir Copilot
+      </Button>
 
-      {(patient?.allergies || patient?.continuous_medications) && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {patient.allergies && (
-            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-              <p className="text-xs font-semibold uppercase text-destructive">
-                Alergias
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm">
-                {patient.allergies}
-              </p>
-            </div>
-          )}
-          {patient.continuous_medications && (
-            <div className="rounded-xl border bg-muted/30 p-4">
-              <p className="text-xs font-semibold uppercase text-muted-foreground">
-                Medicamentos em uso
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm">
-                {patient.continuous_medications}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+      <div className="grid w-full min-w-0 items-start gap-4 min-[1100px]:grid-cols-[minmax(0,58fr)_minmax(420px,42fr)] min-[1440px]:grid-cols-[minmax(0,60fr)_minmax(420px,40fr)]">
+        <main className="min-w-0 space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">
+              Prontuário da consulta
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Documentação clínica oficial do atendimento.
+            </p>
+          </div>
 
-      <LongitudinalClinicalSummary
-        patientId={appointment.patient_id}
-        initialSummary={initialLongitudinalSummary}
-      />
-
-      <ClinicalAIPanel
-        appointmentId={appointment.id}
-        form={form}
-        enabled={aiEnabled}
-        canEdit={canEdit}
-        canManageAi={canManageAi}
-        onFieldsInserted={markAiFields}
-      />
-
-      <RecordDocuments appointmentId={appointment.id} canCreate={canEdit} />
-
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <aside className="xl:sticky xl:top-6">
-          <Card className="shadow-none">
-            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Card className="gap-4 shadow-none">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Stethoscope className="size-5 text-primary" />{" "}
+                {patient?.full_name ?? "Paciente"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
               <div>
-                <CardTitle className="flex items-center gap-2">
-                  <FileClock className="size-5 text-primary" /> Histórico
-                  longitudinal
-                </CardTitle>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Consultas anteriores deste paciente, em modo somente leitura.
+                <p className="text-xs text-muted-foreground">Nome social</p>
+                <p className="mt-1 font-medium">
+                  {patient?.social_name || "Não informado"}
                 </p>
               </div>
-              {history[0] && canEdit && (
-                <Dialog
-                  open={Boolean(importSource)}
-                  onOpenChange={(open) => {
-                    if (!open) {
-                      setImportSource(null);
-                      setSelectedFields([]);
-                    }
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setImportSource(history[0])}
-                    >
-                      <Copy /> Importar dados anteriores
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Importar dados anteriores</DialogTitle>
-                      <DialogDescription>
-                        Escolha a consulta de origem e apenas os campos que
-                        deseja copiar. A evolução completa não será importada.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <label className="text-sm font-medium">
-                      Consulta de origem
-                      <select
-                        className="mt-2 w-full rounded-lg border bg-background px-3 py-2"
-                        value={importSource?.id ?? ""}
-                        onChange={(event) =>
-                          setImportSource(
-                            history.find(
-                              (item) => item.id === event.target.value,
-                            ) ?? null,
-                          )
-                        }
-                      >
-                        {history.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {new Date(
-                              `${item.appointment_date}T12:00:00`,
-                            ).toLocaleDateString("pt-BR")}{" "}
-                            · {item.title}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {importOptions.map((option) => (
-                        <label
-                          key={option.name}
-                          className="flex items-center gap-2 rounded-lg border p-3 text-sm"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedFields.includes(option.name)}
-                            disabled={!importSource?.[option.name]}
-                            onChange={(event) =>
-                              setSelectedFields((current) =>
-                                event.target.checked
-                                  ? [...current, option.name]
-                                  : current.filter(
-                                      (field) => field !== option.name,
-                                    ),
-                              )
-                            }
-                          />
-                          {option.label}
-                        </label>
-                      ))}
-                    </div>
-                    <DialogFooter>
-                      <DialogClose asChild>
-                        <Button type="button" variant="outline">
-                          Cancelar
-                        </Button>
-                      </DialogClose>
-                      <Button
-                        type="button"
-                        disabled={!selectedFields.length}
-                        onClick={importPrevious}
-                      >
-                        Importar selecionados
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              )}
-            </CardHeader>
-            <CardContent>
-              {history.length ? (
-                <div className="space-y-3">
-                  <div className="rounded-xl border bg-muted/20 p-4">
-                    <p className="text-sm">
-                      <span className="text-muted-foreground">
-                        Última consulta:
-                      </span>{" "}
-                      <strong>
-                        {new Date(
-                          `${history[0].appointment_date}T12:00:00`,
-                        ).toLocaleDateString("pt-BR")}
-                      </strong>{" "}
-                      com {history[0].professional_name}
-                    </p>
-                    <p className="mt-2 text-sm">
-                      <strong>Diagnóstico/CID:</strong>{" "}
-                      {history[0].assessment || "Não informado"}
-                      {history[0].cid10 ? ` · ${history[0].cid10}` : ""}
-                    </p>
-                    <p className="mt-1 text-sm">
-                      <strong>Conduta:</strong>{" "}
-                      {history[0].plan || "Não informada"}
-                    </p>
-                  </div>
-                  <div className="space-y-3 border-l-2 pl-4">
-                    {history.map((item) => (
-                      <Dialog key={item.id}>
-                        <DialogTrigger asChild>
-                          <button
-                            type="button"
-                            className="w-full rounded-xl border p-4 text-left transition-colors hover:bg-muted/40"
-                          >
-                            <span className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="font-medium">{item.title}</span>
-                              <Badge variant="outline">
-                                <CalendarClock className="size-3" />{" "}
-                                {new Date(
-                                  `${item.appointment_date}T12:00:00`,
-                                ).toLocaleDateString("pt-BR")}
-                              </Badge>
-                            </span>
-                            <span className="mt-2 block text-sm text-muted-foreground">
-                              {item.chief_complaint ||
-                                "Sem queixa principal registrada"}{" "}
-                              · {item.professional_name}
-                            </span>
-                          </button>
-                        </DialogTrigger>
-                        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
-                          <DialogHeader>
-                            <DialogTitle>{item.title}</DialogTitle>
-                            <DialogDescription>
-                              {new Date(
-                                `${item.appointment_date}T12:00:00`,
-                              ).toLocaleDateString("pt-BR")}{" "}
-                              às {item.start_time.slice(0, 5)} ·{" "}
-                              {item.professional_name} · somente leitura
-                            </DialogDescription>
-                          </DialogHeader>
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            {[
-                              ["Queixa principal", item.chief_complaint],
-                              ["HDA", item.hpi],
-                              ["Avaliação", item.assessment],
-                              ["CID", item.cid10],
-                              ["Conduta", item.plan],
-                              ["Prescrições", item.prescription],
-                              ["Solicitações de exames", item.exam_requests],
-                              ["Alergias", item.allergies],
-                              ["Medicamentos em uso", item.medications],
-                            ].map(([label, value]) => (
-                              <div
-                                key={label}
-                                className="rounded-lg border p-3"
-                              >
-                                <p className="text-xs font-semibold uppercase text-muted-foreground">
-                                  {label}
-                                </p>
-                                <p className="mt-2 whitespace-pre-wrap text-sm">
-                                  {value || "Não informado"}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        </DialogContent>
-                      </Dialog>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="py-8 text-center">
-                  <FileClock className="mx-auto size-7 text-muted-foreground" />
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Nenhuma consulta anterior com prontuário.
+              <div>
+                <p className="text-xs text-muted-foreground">Idade</p>
+                <p className="mt-1 font-medium">
+                  {age === null ? "Não informada" : `${age} anos`}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">CPF</p>
+                <p className="mt-1 font-medium">
+                  {maskedCpf(patient?.cpf ?? null)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Sexo/gênero</p>
+                <p className="mt-1 font-medium">
+                  {patient?.gender || "Não informado"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Telefone</p>
+                <p className="mt-1 font-medium">
+                  {patient?.phone || "Não informado"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Convênio</p>
+                <p className="mt-1 font-medium">
+                  {patient?.insurance || "Não informado"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Profissional</p>
+                <p className="mt-1 font-medium">
+                  {appointment.professional?.full_name || "Não informado"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Tipo</p>
+                <p className="mt-1 font-medium">
+                  {appointmentTypeLabels[appointment.appointment_type]} ·{" "}
+                  {history.length
+                    ? "Paciente em acompanhamento"
+                    : "Primeira consulta registrada"}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {(patient?.allergies || patient?.continuous_medications) && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {patient.allergies && (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+                  <p className="text-xs font-semibold uppercase text-destructive">
+                    Alergias
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm">
+                    {patient.allergies}
                   </p>
                 </div>
               )}
-            </CardContent>
-          </Card>
-          {patientDocuments.length > 0 && (
-            <Card className="mt-4 shadow-none">
-              <CardHeader>
-                <CardTitle className="text-base">Documentos emitidos</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {patientDocuments.map((document) => (
-                  <Link
-                    key={document.id}
-                    href={`/documentos/${document.id}`}
-                    className="flex items-center justify-between rounded-lg border p-3 text-sm hover:bg-muted/30"
-                  >
-                    <span>{document.title}</span>
-                    <Badge
-                      variant={
-                        document.status === "cancelled"
-                          ? "destructive"
-                          : "outline"
-                      }
-                    >
-                      {document.issued_at
-                        ? new Date(document.issued_at).toLocaleDateString(
-                            "pt-BR",
-                          )
-                        : "Emitido"}
-                    </Badge>
-                  </Link>
-                ))}
-              </CardContent>
-            </Card>
+              {patient.continuous_medications && (
+                <div className="rounded-xl border bg-muted/30 p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">
+                    Medicamentos em uso
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm">
+                    {patient.continuous_medications}
+                  </p>
+                </div>
+              )}
+            </div>
           )}
-        </aside>
 
-        <div className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-2">
-            <TextAreaField
+          <LongitudinalClinicalSummary
+            patientId={appointment.patient_id}
+            initialSummary={initialLongitudinalSummary}
+          />
+
+          <div className="space-y-6">
+            <div>
+              <Card className="shadow-none">
+                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <FileClock className="size-5 text-primary" /> Histórico
+                      longitudinal
+                    </CardTitle>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Consultas anteriores deste paciente, em modo somente
+                      leitura.
+                    </p>
+                  </div>
+                  {history[0] && canEdit && (
+                    <Dialog
+                      open={Boolean(importSource)}
+                      onOpenChange={(open) => {
+                        if (!open) {
+                          setImportSource(null);
+                          setSelectedFields([]);
+                        }
+                      }}
+                    >
+                      <DialogTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setImportSource(history[0])}
+                        >
+                          <Copy /> Importar dados anteriores
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Importar dados anteriores</DialogTitle>
+                          <DialogDescription>
+                            Escolha a consulta de origem e apenas os campos que
+                            deseja copiar. A evolução completa não será
+                            importada.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <label className="text-sm font-medium">
+                          Consulta de origem
+                          <select
+                            className="mt-2 w-full rounded-lg border bg-background px-3 py-2"
+                            value={importSource?.id ?? ""}
+                            onChange={(event) =>
+                              setImportSource(
+                                history.find(
+                                  (item) => item.id === event.target.value,
+                                ) ?? null,
+                              )
+                            }
+                          >
+                            {history.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {new Date(
+                                  `${item.appointment_date}T12:00:00`,
+                                ).toLocaleDateString("pt-BR")}{" "}
+                                · {item.title}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {importOptions.map((option) => (
+                            <label
+                              key={option.name}
+                              className="flex items-center gap-2 rounded-lg border p-3 text-sm"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedFields.includes(option.name)}
+                                disabled={!importSource?.[option.name]}
+                                onChange={(event) =>
+                                  setSelectedFields((current) =>
+                                    event.target.checked
+                                      ? [...current, option.name]
+                                      : current.filter(
+                                          (field) => field !== option.name,
+                                        ),
+                                  )
+                                }
+                              />
+                              {option.label}
+                            </label>
+                          ))}
+                        </div>
+                        <DialogFooter>
+                          <DialogClose asChild>
+                            <Button type="button" variant="outline">
+                              Cancelar
+                            </Button>
+                          </DialogClose>
+                          <Button
+                            type="button"
+                            disabled={!selectedFields.length}
+                            onClick={importPrevious}
+                          >
+                            Importar selecionados
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  {history.length ? (
+                    <div className="space-y-3">
+                      <div className="rounded-xl border bg-muted/20 p-4">
+                        <p className="text-sm">
+                          <span className="text-muted-foreground">
+                            Última consulta:
+                          </span>{" "}
+                          <strong>
+                            {new Date(
+                              `${history[0].appointment_date}T12:00:00`,
+                            ).toLocaleDateString("pt-BR")}
+                          </strong>{" "}
+                          com {history[0].professional_name}
+                        </p>
+                        <p className="mt-2 text-sm">
+                          <strong>Diagnóstico/CID:</strong>{" "}
+                          {history[0].assessment || "Não informado"}
+                          {history[0].cid10 ? ` · ${history[0].cid10}` : ""}
+                        </p>
+                        <p className="mt-1 text-sm">
+                          <strong>Conduta:</strong>{" "}
+                          {history[0].plan || "Não informada"}
+                        </p>
+                      </div>
+                      <div className="space-y-3 border-l-2 pl-4">
+                        {history.map((item) => (
+                          <Dialog key={item.id}>
+                            <DialogTrigger asChild>
+                              <button
+                                type="button"
+                                className="w-full rounded-xl border p-4 text-left transition-colors hover:bg-muted/40"
+                              >
+                                <span className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-medium">
+                                    {item.title}
+                                  </span>
+                                  <Badge variant="outline">
+                                    <CalendarClock className="size-3" />{" "}
+                                    {new Date(
+                                      `${item.appointment_date}T12:00:00`,
+                                    ).toLocaleDateString("pt-BR")}
+                                  </Badge>
+                                </span>
+                                <span className="mt-2 block text-sm text-muted-foreground">
+                                  {item.chief_complaint ||
+                                    "Sem queixa principal registrada"}{" "}
+                                  · {item.professional_name}
+                                </span>
+                              </button>
+                            </DialogTrigger>
+                            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+                              <DialogHeader>
+                                <DialogTitle>{item.title}</DialogTitle>
+                                <DialogDescription>
+                                  {new Date(
+                                    `${item.appointment_date}T12:00:00`,
+                                  ).toLocaleDateString("pt-BR")}{" "}
+                                  às {item.start_time.slice(0, 5)} ·{" "}
+                                  {item.professional_name} · somente leitura
+                                </DialogDescription>
+                              </DialogHeader>
+                              <div className="grid gap-4 sm:grid-cols-2">
+                                {[
+                                  ["Queixa principal", item.chief_complaint],
+                                  ["HDA", item.hpi],
+                                  ["Avaliação", item.assessment],
+                                  ["CID", item.cid10],
+                                  ["Conduta", item.plan],
+                                  ["Prescrições", item.prescription],
+                                  [
+                                    "Solicitações de exames",
+                                    item.exam_requests,
+                                  ],
+                                  ["Alergias", item.allergies],
+                                  ["Medicamentos em uso", item.medications],
+                                ].map(([label, value]) => (
+                                  <div
+                                    key={label}
+                                    className="rounded-lg border p-3"
+                                  >
+                                    <p className="text-xs font-semibold uppercase text-muted-foreground">
+                                      {label}
+                                    </p>
+                                    <p className="mt-2 whitespace-pre-wrap text-sm">
+                                      {value || "Não informado"}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-8 text-center">
+                      <FileClock className="mx-auto size-7 text-muted-foreground" />
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Nenhuma consulta anterior com prontuário.
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-6">
+              {sections.map((section, index) => (
+                <div key={section.name} className="contents">
+                  <TextAreaField
+                    form={form}
+                    disabled={!canEdit}
+                    aiPending={aiPendingFields.includes(section.name)}
+                    onManualEdit={markFieldReviewed}
+                    {...section}
+                  />
+                  {index === 1 && (
+                    <div className="grid gap-6 lg:grid-cols-2">
+                      <TextAreaField
+                        form={form}
+                        name="allergies"
+                        label="Alergias"
+                        disabled={!canEdit}
+                        aiPending={aiPendingFields.includes("allergies")}
+                        onManualEdit={markFieldReviewed}
+                      />
+                      <TextAreaField
+                        form={form}
+                        name="medications"
+                        label="Medicamentos em uso"
+                        disabled={!canEdit}
+                        aiPending={aiPendingFields.includes("medications")}
+                        onManualEdit={markFieldReviewed}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <Card className="shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Documentos emitidos
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {patientDocuments.length ? (
+                    patientDocuments.map((document) => (
+                      <Link
+                        key={document.id}
+                        href={`/documentos/${document.id}`}
+                        className="flex items-center justify-between rounded-lg border p-3 text-sm hover:bg-muted/30"
+                      >
+                        <span>{document.title}</span>
+                        <Badge
+                          variant={
+                            document.status === "cancelled"
+                              ? "destructive"
+                              : "outline"
+                          }
+                        >
+                          {document.issued_at
+                            ? new Date(document.issued_at).toLocaleDateString(
+                                "pt-BR",
+                              )
+                            : "Emitido"}
+                        </Badge>
+                      </Link>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Nenhum documento clínico emitido nesta consulta.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </main>
+
+        <aside
+          className={`${copilotMobileOpen ? "fixed inset-0 z-50 block overflow-y-auto bg-background p-4" : "hidden"} min-w-0 max-w-full overflow-x-hidden min-[1100px]:sticky min-[1100px]:inset-auto min-[1100px]:z-auto min-[1100px]:block min-[1100px]:max-h-[calc(100vh-5rem)] min-[1100px]:overflow-y-auto min-[1100px]:bg-transparent min-[1100px]:p-0 min-[1100px]:pr-1 min-[1100px]:overscroll-contain min-[1100px]:top-4`}
+        >
+          <div className="space-y-4">
+            <div className="flex justify-end min-[1100px]:hidden">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setCopilotMobileOpen(false)}
+              >
+                <X /> Fechar Copilot
+              </Button>
+            </div>
+            <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
+                <Sparkles className="size-5 text-primary" /> ASTER Copilot
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Assistência, Chat Clínico, Prescrição IA, Timeline, Scores
+                Clínicos e Documentos.
+              </p>
+            </div>
+            <ClinicalAIPanel
+              appointmentId={appointment.id}
               form={form}
-              name="allergies"
-              label="Alergias"
-              disabled={!canEdit}
-              aiPending={aiPendingFields.includes("allergies")}
-              onManualEdit={markFieldReviewed}
-            />
-            <TextAreaField
-              form={form}
-              name="medications"
-              label="Medicamentos em uso"
-              disabled={!canEdit}
-              aiPending={aiPendingFields.includes("medications")}
-              onManualEdit={markFieldReviewed}
+              enabled={aiEnabled}
+              canEdit={canEdit}
+              canManageAi={canManageAi}
+              onFieldsInserted={markAiFields}
+              documents={
+                <RecordDocuments
+                  appointmentId={appointment.id}
+                  canCreate={canEdit}
+                  documents={patientDocuments}
+                />
+              }
+              patientAge={age}
+              patientGender={patient?.gender ?? null}
             />
           </div>
-
-          {sections.map((section) => (
-            <TextAreaField
-              key={section.name}
-              form={form}
-              disabled={!canEdit}
-              aiPending={aiPendingFields.includes(section.name)}
-              onManualEdit={markFieldReviewed}
-              {...section}
-            />
-          ))}
-        </div>
+        </aside>
       </div>
     </form>
   );

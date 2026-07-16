@@ -14,7 +14,7 @@ export function AppShell({ children }: AppShellProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   return (
-    <div className="min-h-dvh bg-background text-foreground">
+    <div className="min-h-dvh overflow-x-hidden bg-background text-foreground">
       <Sidebar
         collapsed={isSidebarCollapsed}
         desktopOnly
@@ -27,7 +27,7 @@ export function AppShell({ children }: AppShellProps) {
         )}
       >
         <Header />
-        <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main className="box-border w-full max-w-none overflow-x-hidden px-4 py-6 sm:px-5 lg:px-4 lg:py-6">
           {children}
         </main>
       </div>
