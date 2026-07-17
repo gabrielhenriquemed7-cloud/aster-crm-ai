@@ -13,6 +13,8 @@ import {
   ClipboardList,
   FileBarChart2,
   LayoutDashboard,
+  Mail,
+  MessageCircle,
   Settings,
   Sparkles,
   UsersRound,
@@ -128,24 +130,55 @@ function SidebarContent({
       >
         {collapsed ? (
           <Link
-            href="mailto:suporte@astercrm.ai"
-            className="grid size-8 place-items-center rounded-lg text-xs font-semibold text-blue-100 hover:bg-white/10 hover:text-white"
-            aria-label="Entrar em contato com o suporte"
+            href="https://wa.me/5574999267330"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="grid size-8 place-items-center rounded-lg text-blue-100 transition-colors duration-200 hover:bg-white/10 hover:text-white"
+            aria-label="Falar com o Suporte ASTER no WhatsApp"
           >
-            ?
+            <MessageCircle className="size-4" aria-hidden="true" />
           </Link>
         ) : (
           <>
-            <p className="text-xs font-medium">Precisa de ajuda?</p>
-            <p className="mt-1 text-xs leading-5 text-blue-100/70">
-              Fale com nosso time de suporte.
+            <p className="text-xs font-semibold text-white">Suporte ASTER</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-blue-100/70">
+              Estamos disponíveis para ajudá-lo.
             </p>
-            <Link
-              href="mailto:suporte@astercrm.ai"
-              className="mt-3 inline-flex text-xs font-medium text-white hover:underline"
+            <div className="mt-2 space-y-1">
+              <Link
+                href="mailto:joseval.med3@gmail.com"
+                className="flex items-center gap-1.5 text-[11px] text-blue-100/80 transition-colors hover:text-white"
+              >
+                <Mail className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">joseval.med3@gmail.com</span>
+              </Link>
+              <Link
+                href="https://wa.me/5574999267330"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-[11px] text-blue-100/80 transition-colors hover:text-white"
+              >
+                <MessageCircle
+                  className="size-3 shrink-0"
+                  aria-hidden="true"
+                />
+                <span>WhatsApp: (74) 99926-7330</span>
+              </Link>
+            </div>
+            <Button
+              render={
+                <a
+                  href="https://wa.me/5574999267330"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
+              }
+              size="sm"
+              className="mt-2 w-full bg-warning text-warning-foreground transition-colors duration-200 hover:bg-warning/90"
             >
-              Abrir central de ajuda
-            </Link>
+              <MessageCircle aria-hidden="true" />
+              Falar no WhatsApp
+            </Button>
           </>
         )}
       </div>
