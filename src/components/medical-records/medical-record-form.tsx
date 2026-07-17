@@ -3,15 +3,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   AlertCircle,
-  ArrowLeft,
+  Activity,
   CalendarClock,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   FileClock,
+  FileText,
   Flag,
   Loader2,
   Save,
   Sparkles,
-  Stethoscope,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -50,7 +53,11 @@ import type {
 import { appointmentTypeLabels } from "@/lib/appointments/types";
 import { RecordDocuments } from "@/components/clinical-documents/record-documents";
 import { ClinicalAIPanel } from "@/components/medical-records/clinical-ai-panel";
+import { AdaptivePhysicalExam } from "@/components/medical-records/adaptive-physical-exam";
 import { LongitudinalClinicalSummary } from "@/components/medical-records/longitudinal-clinical-summary";
+import { MedicalRecordCopilotPortal } from "@/components/medical-records/medical-record-copilot-portal";
+import { useMedicalRecordLayout } from "@/components/medical-records/medical-record-layout";
+import { PatientClinicalTimeline } from "@/components/medical-records/patient-clinical-timeline";
 import type { StoredLongitudinalSummary } from "@/lib/ai/longitudinal-schema";
 
 type FieldName = keyof MedicalRecordFormValues;
@@ -63,39 +70,32 @@ const sections: Array<{
 }> = [
   {
     name: "chief_complaint",
-    label: "Motivo da consulta",
+    label: "Queixa principal",
     placeholder: "Queixa principal e motivo do atendimento.",
   },
-  { name: "hpi", label: "HDA", placeholder: "História da doença atual." },
+  {
+    name: "hpi",
+    label: "História da doença atual",
+    placeholder: "Descreva a história da doença atual.",
+  },
   {
     name: "pmh",
     label: "Antecedentes pessoais",
     placeholder: "História patológica pregressa.",
   },
-  { name: "family_history", label: "Antecedentes familiares" },
+  { name: "family_history", label: "História familiar" },
   {
     name: "social_history",
-    label: "Hábitos de vida",
+    label: "História social e hábitos de vida",
     placeholder: "Tabagismo, etilismo, atividade física, alimentação e sono.",
   },
-  {
-    name: "vital_signs",
-    label: "Sinais vitais",
-    placeholder: "PA:\nFC:\nFR:\nSat:\nPeso:\nAltura:\nIMC:",
-  },
-  {
-    name: "physical_exam",
-    label: "Exame físico",
-    placeholder: "Achados do exame físico.",
-    rows: 10,
-  },
-  { name: "assessment", label: "Diagnósticos / avaliação" },
+  { name: "assessment", label: "Hipóteses diagnósticas" },
   {
     name: "cid10",
     label: "CID-10",
     placeholder: "Códigos e descrições dos diagnósticos.",
   },
-  { name: "plan", label: "Conduta" },
+  { name: "plan", label: "Plano e conduta" },
   {
     name: "prescription",
     label: "Prescrição",
@@ -178,39 +178,57 @@ function TextAreaField({
 }) {
   const error = form.formState.errors[name]?.message;
   const registration = form.register(name);
+  const [open, setOpen] = useState(name === "chief_complaint");
+  const helperText = placeholder?.replaceAll("\n", " ") || `Preencha ${label.toLowerCase()}.`;
   return (
-    <section
-      className={`scroll-mt-6 rounded-xl border bg-card p-5 transition-[background-color,box-shadow] duration-500 ${
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      data-section={name}
+      className={`group scroll-mt-6 overflow-hidden rounded-lg border bg-card transition-[background-color,box-shadow] duration-500 ${
         aiPending
           ? "bg-primary/5 ring-2 ring-primary/35 animate-[ai-field-highlight_2s_ease-out]"
           : ""
       }`}
     >
-      <label
-        className="text-sm font-semibold uppercase tracking-wide"
-        htmlFor={name}
-      >
-        {label}
-      </label>
-      <textarea
-        id={name}
-        rows={rows}
-        disabled={disabled}
-        placeholder={placeholder}
-        className="mt-3 w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm leading-6 outline-none transition-shadow placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-70"
-        {...registration}
-        onChange={(event) => {
-          void registration.onChange(event);
-          onManualEdit(name);
-        }}
-      />
-      {aiPending && (
-        <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
-          Preenchido pelo ASTER Copilot — pendente de revisão
-        </p>
-      )}
-      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
-    </section>
+      <summary className="grid h-12 cursor-pointer list-none grid-cols-[20px_minmax(150px,auto)_minmax(0,1fr)_20px] items-center gap-3 px-4 text-left [&::-webkit-details-marker]:hidden">
+        <FileText className="size-[18px] text-primary" aria-hidden="true" />
+        <span className="truncate text-sm font-semibold leading-none">
+          {label}
+        </span>
+        <span className="hidden truncate text-[13px] text-muted-foreground sm:block">
+          {helperText}
+        </span>
+        {open ? (
+          <ChevronDown className="size-[18px] text-muted-foreground" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="size-[18px] text-muted-foreground" aria-hidden="true" />
+        )}
+      </summary>
+      <div className="border-t p-3 pt-2">
+        <label className="sr-only" htmlFor={name}>
+          {label}
+        </label>
+        <textarea
+          id={name}
+          rows={rows}
+          disabled={disabled}
+          placeholder={placeholder}
+          className="w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm leading-6 outline-none transition-shadow placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-70"
+          {...registration}
+          onChange={(event) => {
+            void registration.onChange(event);
+            onManualEdit(name);
+          }}
+        />
+        {aiPending && (
+          <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+            Preenchido pelo ASTER Copilot — pendente de revisão
+          </p>
+        )}
+        {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+      </div>
+    </details>
   );
 }
 
@@ -241,6 +259,7 @@ export function MedicalRecordForm({
   initialLongitudinalSummary: StoredLongitudinalSummary | null;
 }) {
   const router = useRouter();
+  const { copilotCollapsed, toggleCopilot } = useMedicalRecordLayout();
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error"
@@ -402,20 +421,12 @@ export function MedicalRecordForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(submit)} className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <Button
-            variant="ghost"
-            size="sm"
-            render={<Link href={`/consultas/${appointment.id}`} />}
-            className="-ml-2 mb-2"
-          >
-            <ArrowLeft /> Consulta
-          </Button>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">
-              Prontuário eletrônico
+    <form onSubmit={form.handleSubmit(submit)} className="min-w-0 space-y-4">
+      <header className="flex min-h-16 flex-col gap-3 border-b bg-background pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="truncate text-lg font-semibold tracking-tight">
+              {patient?.social_name || patient?.full_name || "Paciente"}
             </h1>
             <Badge
               variant={
@@ -434,16 +445,31 @@ export function MedicalRecordForm({
                     ? "Rascunho"
                     : "Novo"}
             </Badge>
+            <span className="text-xs text-muted-foreground">
+              {age === null ? "Idade não informada" : `${age} anos`}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {patient?.gender || "Sexo não informado"}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {maskedCpf(patient?.cpf ?? null)}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {patient?.insurance || "Sem convênio"}
+            </span>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Atendimento de{" "}
+          <p className="mt-1 text-xs text-muted-foreground">
             {new Intl.DateTimeFormat("pt-BR").format(
               new Date(`${appointment.appointment_date}T12:00:00`),
             )}{" "}
-            às {appointment.start_time.slice(0, 5)}
+            • {appointment.start_time.slice(0, 5)} •{" "}
+            {appointmentTypeLabels[appointment.appointment_type]}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button type="button" size="sm" variant="outline" render={<Link href={`/patients/${appointment.patient_id}/longitudinal`} />} nativeButton={false}>
+            <Activity /> Visão longitudinal
+          </Button>
           <div className="text-right text-xs text-muted-foreground">
             {saveState === "saving" && "Salvando rascunho..."}
             {saveState === "saved" && (
@@ -542,7 +568,7 @@ export function MedicalRecordForm({
             </Dialog>
           )}
         </div>
-      </div>
+      </header>
 
       {!canEdit && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-200">
@@ -558,119 +584,31 @@ export function MedicalRecordForm({
         </div>
       )}
 
+      <PatientClinicalTimeline
+        appointment={appointment}
+        history={history}
+        documents={patientDocuments}
+      />
+
       <Button
         type="button"
-        className="fixed right-4 bottom-4 z-40 shadow-lg min-[1100px]:hidden"
+        className="fixed right-4 bottom-4 z-40 shadow-lg lg:hidden"
         onClick={() => setCopilotMobileOpen(true)}
       >
         <Sparkles /> Abrir Copilot
       </Button>
 
-      <div className="grid w-full min-w-0 items-start gap-4 min-[1100px]:grid-cols-[minmax(0,58fr)_minmax(420px,42fr)] min-[1440px]:grid-cols-[minmax(0,60fr)_minmax(420px,40fr)]">
-        <main className="min-w-0 space-y-6">
-          <div>
-            <h2 className="text-xl font-semibold tracking-tight">
-              Prontuário da consulta
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Documentação clínica oficial do atendimento.
-            </p>
+      <div className="w-full min-w-0">
+        <main className="flex min-w-0 flex-col gap-4">
+          <div className="order-2">
+            <LongitudinalClinicalSummary
+              patientId={appointment.patient_id}
+              initialSummary={initialLongitudinalSummary}
+            />
           </div>
 
-          <Card className="gap-4 shadow-none">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Stethoscope className="size-5 text-primary" />{" "}
-                {patient?.full_name ?? "Paciente"}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <p className="text-xs text-muted-foreground">Nome social</p>
-                <p className="mt-1 font-medium">
-                  {patient?.social_name || "Não informado"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Idade</p>
-                <p className="mt-1 font-medium">
-                  {age === null ? "Não informada" : `${age} anos`}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">CPF</p>
-                <p className="mt-1 font-medium">
-                  {maskedCpf(patient?.cpf ?? null)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Sexo/gênero</p>
-                <p className="mt-1 font-medium">
-                  {patient?.gender || "Não informado"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Telefone</p>
-                <p className="mt-1 font-medium">
-                  {patient?.phone || "Não informado"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Convênio</p>
-                <p className="mt-1 font-medium">
-                  {patient?.insurance || "Não informado"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Profissional</p>
-                <p className="mt-1 font-medium">
-                  {appointment.professional?.full_name || "Não informado"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Tipo</p>
-                <p className="mt-1 font-medium">
-                  {appointmentTypeLabels[appointment.appointment_type]} ·{" "}
-                  {history.length
-                    ? "Paciente em acompanhamento"
-                    : "Primeira consulta registrada"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {(patient?.allergies || patient?.continuous_medications) && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {patient.allergies && (
-                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-                  <p className="text-xs font-semibold uppercase text-destructive">
-                    Alergias
-                  </p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm">
-                    {patient.allergies}
-                  </p>
-                </div>
-              )}
-              {patient.continuous_medications && (
-                <div className="rounded-xl border bg-muted/30 p-4">
-                  <p className="text-xs font-semibold uppercase text-muted-foreground">
-                    Medicamentos em uso
-                  </p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm">
-                    {patient.continuous_medications}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          <LongitudinalClinicalSummary
-            patientId={appointment.patient_id}
-            initialSummary={initialLongitudinalSummary}
-          />
-
-          <div className="space-y-6">
-            <div>
+          <div className="contents">
+            <div className="order-3">
               <Card className="shadow-none">
                 <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -883,7 +821,7 @@ export function MedicalRecordForm({
               </Card>
             </div>
 
-            <div className="space-y-6">
+            <div className="order-1 space-y-1.5">
               {sections.map((section, index) => (
                 <div key={section.name} className="contents">
                   <TextAreaField
@@ -893,8 +831,16 @@ export function MedicalRecordForm({
                     onManualEdit={markFieldReviewed}
                     {...section}
                   />
-                  {index === 1 && (
-                    <div className="grid gap-6 lg:grid-cols-2">
+                  {index === 2 && (
+                    <div className="space-y-1.5">
+                      <TextAreaField
+                        form={form}
+                        name="medications"
+                        label="Medicações em uso"
+                        disabled={!canEdit}
+                        aiPending={aiPendingFields.includes("medications")}
+                        onManualEdit={markFieldReviewed}
+                      />
                       <TextAreaField
                         form={form}
                         name="allergies"
@@ -903,26 +849,36 @@ export function MedicalRecordForm({
                         aiPending={aiPendingFields.includes("allergies")}
                         onManualEdit={markFieldReviewed}
                       />
-                      <TextAreaField
-                        form={form}
-                        name="medications"
-                        label="Medicamentos em uso"
-                        disabled={!canEdit}
-                        aiPending={aiPendingFields.includes("medications")}
-                        onManualEdit={markFieldReviewed}
-                      />
                     </div>
+                  )}
+                  {section.name === "social_history" && (
+                    <AdaptivePhysicalExam
+                      form={form}
+                      disabled={!canEdit}
+                      patientAge={age}
+                      aiPending={
+                        aiPendingFields.includes("physical_exam") ||
+                        aiPendingFields.includes("vital_signs")
+                      }
+                      onManualEdit={markFieldReviewed}
+                    />
                   )}
                 </div>
               ))}
 
-              <Card className="shadow-none">
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Documentos emitidos
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
+              <details
+                data-section="documents"
+                className="group overflow-hidden rounded-lg border bg-card"
+              >
+                <summary className="grid h-12 cursor-pointer list-none grid-cols-[20px_minmax(150px,auto)_minmax(0,1fr)_20px] items-center gap-3 px-4 [&::-webkit-details-marker]:hidden">
+                  <FileText className="size-[18px] text-primary" aria-hidden="true" />
+                  <span className="truncate text-sm font-semibold">Documentos</span>
+                  <span className="hidden truncate text-[13px] text-muted-foreground sm:block">
+                    Consulte os documentos emitidos nesta consulta.
+                  </span>
+                  <ChevronRight className="size-[18px] text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
+                </summary>
+                <div className="space-y-2 border-t p-3">
                   {patientDocuments.length ? (
                     patientDocuments.map((document) => (
                       <Link
@@ -951,54 +907,74 @@ export function MedicalRecordForm({
                       Nenhum documento clínico emitido nesta consulta.
                     </p>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </details>
             </div>
           </div>
         </main>
 
-        <aside
-          className={`${copilotMobileOpen ? "fixed inset-0 z-50 block overflow-y-auto bg-background p-4" : "hidden"} min-w-0 max-w-full overflow-x-hidden min-[1100px]:sticky min-[1100px]:inset-auto min-[1100px]:z-auto min-[1100px]:block min-[1100px]:max-h-[calc(100vh-5rem)] min-[1100px]:overflow-y-auto min-[1100px]:bg-transparent min-[1100px]:p-0 min-[1100px]:pr-1 min-[1100px]:overscroll-contain min-[1100px]:top-4`}
-        >
-          <div className="space-y-4">
-            <div className="flex justify-end min-[1100px]:hidden">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setCopilotMobileOpen(false)}
-              >
-                <X /> Fechar Copilot
-              </Button>
-            </div>
-            <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
-              <h2 className="flex items-center gap-2 text-lg font-semibold">
-                <Sparkles className="size-5 text-primary" /> ASTER Copilot
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Assistência, Chat Clínico, Prescrição IA, Timeline, Scores
-                Clínicos e Documentos.
-              </p>
-            </div>
-            <ClinicalAIPanel
-              appointmentId={appointment.id}
-              form={form}
-              enabled={aiEnabled}
-              canEdit={canEdit}
-              canManageAi={canManageAi}
-              onFieldsInserted={markAiFields}
-              documents={
-                <RecordDocuments
+        <MedicalRecordCopilotPortal>
+          <aside
+            className={`${copilotMobileOpen ? "fixed inset-0 z-50 block overflow-y-auto bg-background p-4" : "hidden"} min-w-0 max-w-full overflow-x-hidden lg:inset-auto lg:z-auto lg:block lg:h-full lg:min-h-full lg:bg-transparent lg:p-0`}
+          >
+            {copilotCollapsed && !copilotMobileOpen ? (
+              <div className="flex min-h-full flex-col items-center gap-3 rounded-xl border border-primary/25 bg-card p-2 shadow-sm">
+                <Sparkles className="mt-2 size-5 text-primary" />
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Expandir ASTER Copilot"
+                  onClick={toggleCopilot}
+                >
+                  <ChevronLeft />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex h-full min-h-full flex-col gap-3 rounded-xl border border-primary/25 bg-card p-2 shadow-sm">
+                <div className="flex justify-end lg:hidden">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setCopilotMobileOpen(false)}
+                  >
+                    <X /> Fechar Copilot
+                  </Button>
+                </div>
+                <ClinicalAIPanel
                   appointmentId={appointment.id}
-                  canCreate={canEdit}
-                  documents={patientDocuments}
+                  form={form}
+                  enabled={aiEnabled}
+                  canEdit={canEdit}
+                  canManageAi={canManageAi}
+                  onFieldsInserted={markAiFields}
+                  documents={
+                    <RecordDocuments
+                      appointmentId={appointment.id}
+                      canCreate={canEdit}
+                      documents={patientDocuments}
+                      getFormValues={() => form.getValues()}
+                    />
+                  }
+                  patientAge={age}
+                  patientGender={patient?.gender ?? null}
                 />
-              }
-              patientAge={age}
-              patientGender={patient?.gender ?? null}
-            />
-          </div>
-        </aside>
+                <div className="mt-auto hidden justify-end border-t pt-2 lg:flex">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label="Recolher ASTER Copilot"
+                    onClick={toggleCopilot}
+                  >
+                    <ChevronRight /> Recolher painel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </aside>
+        </MedicalRecordCopilotPortal>
       </div>
     </form>
   );

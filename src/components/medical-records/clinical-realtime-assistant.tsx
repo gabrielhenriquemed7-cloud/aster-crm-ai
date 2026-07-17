@@ -31,10 +31,15 @@ import { ClinicalScores } from "@/components/medical-records/clinical-scores";
 import type { ClinicalAiSuggestion } from "@/lib/ai/clinical-schema";
 import type { RealtimeClinicalAnalysis } from "@/lib/ai/clinical-realtime-schema";
 import type { ClinicalTimelineEvent } from "@/lib/ai/clinical-timeline-schema";
+import {
+  buildClinicalContext,
+  getDocumentationPendingItems,
+  hasSufficientClinicalContext,
+} from "@/lib/ai/clinical-context";
 import type { MedicalRecordFormValues } from "@/lib/medical-records/schema";
 
 const UPDATE_INTERVAL_MS = 20_000;
-const SENTENCE_DEBOUNCE_MS = 900;
+const SENTENCE_DEBOUNCE_MS = 2_000;
 const copilotTabs = [
   "assistance",
   "chat",
@@ -160,6 +165,7 @@ export function ClinicalRealtimeAssistant({
   onInsertTimeline,
   patientAge,
   patientGender,
+  onTabChange,
 }: {
   appointmentId: string;
   text: string;
@@ -176,6 +182,7 @@ export function ClinicalRealtimeAssistant({
   ) => void;
   patientAge: number | null;
   patientGender: string | null;
+  onTabChange: (tab: CopilotTab) => void;
 }) {
   const [analysis, setAnalysis] =
     useState<RealtimeClinicalAnalysis>(emptyAnalysis);
@@ -199,6 +206,7 @@ export function ClinicalRealtimeAssistant({
   const [pinnedHypotheses, setPinnedHypotheses] = useState<string[]>([]);
   const [openProtocols, setOpenProtocols] = useState<string[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [analyzedFingerprint, setAnalyzedFingerprint] = useState("");
   const lastSentTextRef = useRef("");
   const lastFingerprintRef = useRef("");
   const latestFingerprintRef = useRef("");
@@ -208,27 +216,27 @@ export function ClinicalRealtimeAssistant({
 
   const currentContext = useCallback(() => {
     const values = getFormValues();
+    const clinicalContext = buildClinicalContext({
+      values,
+      transcription: text,
+      patientAge,
+      patientGender,
+    });
     return {
       values,
+      clinicalContext,
       serialized: JSON.stringify({
-        text: text.trim(),
-        chiefComplaint: values.chief_complaint || "",
-        hpi: values.hpi || "",
-        history: [values.pmh, values.family_history, values.social_history]
-          .filter(Boolean)
-          .join("\n"),
-        allergies: values.allergies || "",
-        medications: values.medications || "",
-        vitalSigns: values.vital_signs || "",
-        physicalExam: values.physical_exam || "",
+        ...clinicalContext,
+        lastUpdatedAt: undefined,
       }),
     };
-  }, [getFormValues, text]);
+  }, [getFormValues, patientAge, patientGender, text]);
 
   const update = useCallback(
     async (force = false) => {
-      if (!enabled || paused || loadingRef.current) return;
+      if (!enabled || loadingRef.current) return;
       const context = currentContext();
+      if (!hasSufficientClinicalContext(context.clinicalContext)) return;
       const contextFingerprint = fingerprint(context.serialized);
       latestFingerprintRef.current = contextFingerprint;
       if (!force && contextFingerprint === lastFingerprintRef.current) return;
@@ -288,6 +296,7 @@ export function ClinicalRealtimeAssistant({
       }
       setAnalysis(result.analysis);
       setLastUpdated(new Date().toISOString());
+      setAnalyzedFingerprint(contextFingerprint);
     },
     [
       analysis,
@@ -295,7 +304,6 @@ export function ClinicalRealtimeAssistant({
       currentContext,
       enabled,
       hypothesisStates,
-      paused,
       questionStates,
       text,
     ],
@@ -307,6 +315,7 @@ export function ClinicalRealtimeAssistant({
     const nextFingerprint = fingerprint(context.serialized);
     latestFingerprintRef.current = nextFingerprint;
     if (nextFingerprint === lastFingerprintRef.current) return;
+    if (!hasSufficientClinicalContext(context.clinicalContext)) return;
     const now = Date.now();
     pendingSinceRef.current ??= now;
     const hasNewSentence = /[.!?]\s*$/.test(text.trim());
@@ -336,6 +345,17 @@ export function ClinicalRealtimeAssistant({
     analysis.importantPatientData.length ||
     analysis.possibleProtocols.length ||
     analysis.contradictions.length;
+  const context = currentContext();
+  const hasSufficientContext = hasSufficientClinicalContext(
+    context.clinicalContext,
+  );
+  const stale = Boolean(
+    lastUpdated &&
+      fingerprint(context.serialized) !== analyzedFingerprint,
+  );
+  const documentationPendingItems = getDocumentationPendingItems(
+    context.values,
+  );
 
   return (
     <aside className="w-full min-w-0 max-w-full space-y-4 overflow-x-hidden rounded-xl border border-primary/25 bg-card p-3 shadow-sm sm:p-4">
@@ -359,7 +379,7 @@ export function ClinicalRealtimeAssistant({
       {!collapsed && (
         <>
           <div
-            className="flex w-full flex-nowrap gap-1 overflow-x-auto rounded-lg bg-muted p-1 pb-2 whitespace-nowrap [scrollbar-width:thin]"
+            className="grid w-full grid-cols-3 gap-1 overflow-hidden rounded-lg bg-muted p-1"
             role="tablist"
             aria-label="Recursos do ASTER Copilot"
           >
@@ -368,12 +388,15 @@ export function ClinicalRealtimeAssistant({
                 key={item}
                 type="button"
                 size="xs"
-                className="min-h-8 shrink-0 whitespace-nowrap px-2"
+                className="min-h-8 min-w-0 justify-start overflow-hidden px-1.5 text-[11px] whitespace-nowrap [&_svg]:size-3.5"
                 role="tab"
                 aria-selected={tab === item}
                 data-copilot-tab={item}
                 variant={tab === item ? "secondary" : "ghost"}
-                onClick={() => setTab(item)}
+                onClick={() => {
+                  setTab(item);
+                  onTabChange(item);
+                }}
               >
                 {copilotTabIcon(item)}
                 {copilotTabLabel(item)}
@@ -399,7 +422,7 @@ export function ClinicalRealtimeAssistant({
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={loading || paused}
+                  disabled={loading || !hasSufficientContext}
                   onClick={() => void update(true)}
                 >
                   <RefreshCw /> Atualizar agora
@@ -412,6 +435,7 @@ export function ClinicalRealtimeAssistant({
                   onClick={() => {
                     setAnalysis(emptyAnalysis);
                     setError("");
+                    setAnalyzedFingerprint("");
                   }}
                 >
                   <Eraser /> Limpar sugestões
@@ -421,6 +445,12 @@ export function ClinicalRealtimeAssistant({
                 <p className="text-sm text-amber-700">
                   Assistência automática pausada. A gravação continua
                   normalmente.
+                </p>
+              )}
+              {stale && (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-700">
+                  Pode estar desatualizado. Atualize agora ou mantenha as
+                  sugestões atuais.
                 </p>
               )}
               {loading && (
@@ -447,10 +477,15 @@ export function ClinicalRealtimeAssistant({
                   {error}
                 </p>
               )}
-              {!hasContent && !loading && (
+              {!hasSufficientContext && !loading && (
                 <p className="text-sm text-muted-foreground">
-                  O acompanhamento começa quando houver contexto clínico
+                  O acompanhamento começará quando houver contexto clínico
                   suficiente.
+                </p>
+              )}
+              {hasSufficientContext && !hasContent && !loading && !error && (
+                <p className="text-sm text-muted-foreground">
+                  Sem novas sugestões para o contexto atual.
                 </p>
               )}
 
@@ -582,6 +617,7 @@ export function ClinicalRealtimeAssistant({
                           variant="ghost"
                           onClick={() => {
                             setTab("chat");
+                            onTabChange("chat");
                             window.setTimeout(
                               () =>
                                 window.dispatchEvent(
@@ -868,6 +904,20 @@ export function ClinicalRealtimeAssistant({
                   ))}
                 </CardShell>
               )}
+              {documentationPendingItems.length > 0 && (
+                <CardShell
+                  id="realtime-documentation-pending"
+                  title="Pendências do prontuário"
+                  pinned={isPinned("documentation-pending")}
+                  onPin={() => pinCard("documentation-pending")}
+                >
+                  <ul className="space-y-2 text-sm">
+                    {documentationPendingItems.map((item) => (
+                      <li key={item}>• {item}</li>
+                    ))}
+                  </ul>
+                </CardShell>
+              )}
               {analysis.summary && (
                 <p className="rounded-lg bg-muted/50 p-3 text-sm">
                   {analysis.summary}
@@ -892,6 +942,7 @@ export function ClinicalRealtimeAssistant({
               assistance={analysis}
               clinicalSuggestion={clinicalSuggestion}
               onInsert={onInsertPrescription}
+              patientAge={patientAge}
             />
           ) : tab === "timeline" ? (
             <ClinicalTimeline
@@ -917,6 +968,9 @@ export function ClinicalRealtimeAssistant({
           )}
         </>
       )}
+      <p className="border-t pt-3 text-xs font-medium text-muted-foreground">
+        Conteúdo gerado por IA. Requer avaliação e validação profissional.
+      </p>
     </aside>
   );
 }

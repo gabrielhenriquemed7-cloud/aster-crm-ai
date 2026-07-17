@@ -2,8 +2,10 @@
 
 import { useState, type ReactNode } from "react";
 
-import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
+import { AppFooter } from "@/components/layout/app-footer";
+import { PageViewport } from "@/components/layout/page-viewport";
+import { TopNavbar } from "@/components/layout/top-navbar";
 import { cn } from "@/lib/utils";
 
 interface AppShellProps {
@@ -22,14 +24,13 @@ export function AppShell({ children }: AppShellProps) {
       />
       <div
         className={cn(
-          "min-h-dvh transition-[padding] duration-200 lg:pl-64",
+          "flex min-h-dvh flex-col transition-[padding] duration-200 ease-out lg:pl-64",
           isSidebarCollapsed && "lg:pl-20",
         )}
       >
-        <Header />
-        <main className="box-border w-full max-w-none overflow-x-hidden px-4 py-6 sm:px-5 lg:px-4 lg:py-6">
-          {children}
-        </main>
+        <TopNavbar />
+        <PageViewport>{children}</PageViewport>
+        <AppFooter />
       </div>
     </div>
   );

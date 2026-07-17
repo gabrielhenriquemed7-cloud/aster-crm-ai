@@ -19,6 +19,7 @@ import {
 } from "@/app/(dashboard)/consultas/prescription-ai-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PrescriptionSafetyWorkspace } from "@/components/medical-records/prescription-safety-workspace";
 import type { ClinicalAiSuggestion } from "@/lib/ai/clinical-schema";
 import type {
   AiMedication,
@@ -89,12 +90,14 @@ export function IntelligentPrescription({
   assistance,
   clinicalSuggestion,
   onInsert,
+  patientAge,
 }: {
   appointmentId: string;
   getFormValues: () => MedicalRecordFormValues;
   assistance: RealtimeClinicalAnalysis;
   clinicalSuggestion: ClinicalAiSuggestion | null;
   onInsert: (value: string) => void;
+  patientAge: number | null;
 }) {
   const [prescription, setPrescription] = useState<AiPrescription | null>(null);
   const [generationId, setGenerationId] = useState<string | null>(null);
@@ -239,6 +242,12 @@ export function IntelligentPrescription({
 
   return (
     <div className="space-y-4">
+      <PrescriptionSafetyWorkspace
+        getFormValues={getFormValues}
+        patientAge={patientAge}
+        onInsert={onInsert}
+      />
+      <div className="border-t pt-4">
       <div>
         <h4 className="font-semibold">Prescrição Inteligente</h4>
         <p className="text-sm text-muted-foreground">
@@ -460,7 +469,10 @@ export function IntelligentPrescription({
         </div>
       )}
       <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
-        Prescrição sugerida por IA. Revise cuidadosamente antes de assinar.
+        Prescrição assistida por IA. Requer revisão, validação e assinatura
+        profissional. As sugestões abaixo não foram verificadas por uma base
+        farmacológica licenciada.
+      </div>
       </div>
     </div>
   );

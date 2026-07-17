@@ -44,63 +44,6 @@ type Section = {
   field?: FieldName;
 };
 
-type FormBinding = {
-  field: FieldName;
-  value: string;
-};
-
-function joinSections(
-  entries: Array<[label: string, value: string | undefined]>,
-) {
-  return entries
-    .filter((entry): entry is [string, string] => Boolean(entry[1]?.trim()))
-    .map(([label, value]) => `${label}\n${value.trim()}`)
-    .join("\n\n");
-}
-
-function formBindings(
-  requestType: ClinicalAiRequestType,
-  suggestion: ClinicalAiSuggestion,
-): FormBinding[] {
-  if (requestType === "soap") {
-    return [
-      { field: "hpi", value: suggestion.hpi.trim() },
-      { field: "physical_exam", value: suggestion.physicalExam.trim() },
-      { field: "assessment", value: suggestion.clinicalAssessment.trim() },
-      { field: "plan", value: suggestion.plan.trim() },
-    ];
-  }
-
-  if (requestType === "structured_anamnesis") {
-    return [
-      { field: "chief_complaint", value: suggestion.chiefComplaint.trim() },
-      {
-        field: "hpi",
-        value: joinSections([
-          ["HMA/HDA", suggestion.hpi],
-          ["Revisão de sistemas", suggestion.reviewOfSystems],
-        ]),
-      },
-      { field: "pmh", value: suggestion.personalHistory.trim() },
-      { field: "medications", value: suggestion.medications.trim() },
-      { field: "allergies", value: suggestion.allergies.trim() },
-      { field: "social_history", value: suggestion.socialHistory.trim() },
-      { field: "family_history", value: suggestion.familyHistory.trim() },
-      { field: "physical_exam", value: suggestion.physicalExam.trim() },
-      {
-        field: "assessment",
-        value: joinSections([
-          ["Hipóteses", suggestion.diagnosticHypotheses],
-          ["Impressão clínica", suggestion.clinicalAssessment],
-        ]),
-      },
-      { field: "plan", value: suggestion.plan.trim() },
-    ];
-  }
-
-  return [];
-}
-
 const sections: Section[] = [
   {
     key: "chiefComplaint",
@@ -195,6 +138,7 @@ export function ClinicalAIPanel({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [transcriptionReady, setTranscriptionReady] = useState(false);
+  const [activeCopilotTab, setActiveCopilotTab] = useState("assistance");
   const [conflicts, setConflicts] = useState<
     Array<{ field: FieldName; label: string; value: string; keys: string[] }>
   >([]);
@@ -234,7 +178,7 @@ export function ClinicalAIPanel({
     return (
       <Card
         id="aster-copilot"
-        className="w-full border-amber-500/30 bg-amber-500/5 shadow-none"
+        className="h-full w-full border-0 bg-amber-500/5 shadow-none"
       >
         <CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
           <div>
@@ -283,43 +227,8 @@ export function ClinicalAIPanel({
     setSuggestion(result.suggestion);
     setGenerationId(result.generationId);
     setSelected(available);
-    const bindings = formBindings(requestType, result.suggestion);
-    const availableBindings = bindings.filter(
-      ({ field }) => !form.getValues(field)?.trim(),
-    );
-    const occupiedBindings = bindings.filter(({ field, value }) =>
-      Boolean(value && form.getValues(field)?.trim()),
-    );
-    availableBindings.forEach(({ field, value }) => {
-      form.setValue(field, value, {
-        shouldDirty: true,
-        shouldValidate: true,
-      });
-    });
-    const filledFields = availableBindings
-      .filter(({ value }) => Boolean(value))
-      .map(({ field }) => field);
-    if (filledFields.length) onFieldsInserted(filledFields);
-    if (occupiedBindings.length) {
-      setConflicts(
-        occupiedBindings.map(({ field, value }) => ({
-          field,
-          label:
-            sections.find((section) => section.field === field)?.label ?? field,
-          value,
-          keys: [],
-        })),
-      );
-      setResolutions(
-        Object.fromEntries(
-          occupiedBindings.map(({ field }) => [field, "keep"]),
-        ),
-      );
-    }
     setSuccess(
-      bindings.length
-        ? "Sugestão gerada e distribuída automaticamente no formulário. Revise e salve o prontuário."
-        : "Sugestão gerada com sucesso. Revise o conteúdo antes de inserir.",
+      "Sugestão gerada com sucesso. Revise o conteúdo antes de inserir.",
     );
   }
 
@@ -451,14 +360,21 @@ export function ClinicalAIPanel({
   }
 
   return (
-    <Card id="aster-copilot" className="w-full border-primary/25 shadow-none">
+    <Card
+      id="aster-copilot"
+      className="flex min-h-0 w-full flex-1 flex-col border-0 shadow-none"
+    >
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Bot className="size-5 text-primary" /> ASTER COPILOT
         </CardTitle>
       </CardHeader>
-      <CardContent className="grid min-w-0 items-start gap-4 overflow-x-hidden px-3 sm:px-5">
-        <details open className="min-w-0 rounded-xl border bg-muted/15 p-3">
+      <CardContent className="grid min-w-0 flex-1 items-start gap-4 overflow-x-hidden px-3 sm:px-5">
+        {activeCopilotTab === "assistance" && (
+          <details
+            open
+            className="min-w-0 rounded-xl border bg-muted/15 p-3"
+          >
           <summary className="cursor-pointer text-sm font-semibold">
             Captura e análise da consulta
           </summary>
@@ -602,7 +518,8 @@ export function ClinicalAIPanel({
               IA. Revise antes de inserir no prontuário.
             </p>
           </div>
-        </details>
+          </details>
+        )}
         <div className="min-w-0 space-y-4">
           <ClinicalRealtimeAssistant
             key={appointmentId}
@@ -668,8 +585,9 @@ export function ClinicalAIPanel({
             documents={documents}
             patientAge={patientAge}
             patientGender={patientGender}
+            onTabChange={setActiveCopilotTab}
           />
-          {suggestion && (
+          {activeCopilotTab === "assistance" && suggestion && (
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
                 <Button

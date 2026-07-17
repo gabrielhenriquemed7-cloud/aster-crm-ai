@@ -6,11 +6,13 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { createClinicalDocument } from "@/app/(dashboard)/documentos/actions";
 import { Button } from "@/components/ui/button";
+import { ClinicalDocumentationAssistant } from "@/components/clinical-documents/clinical-documentation-assistant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   clinicalDocumentLabels,
   type ClinicalDocumentType,
 } from "@/lib/clinical-documents/types";
+import type { MedicalRecordFormValues } from "@/lib/medical-records/schema";
 const types: ClinicalDocumentType[] = [
   "prescription",
   "exam_request",
@@ -23,6 +25,7 @@ export function RecordDocuments({
   appointmentId,
   canCreate,
   documents,
+  getFormValues,
 }: {
   appointmentId: string;
   canCreate: boolean;
@@ -33,6 +36,7 @@ export function RecordDocuments({
     issued_at: string | null;
     created_at: string;
   }>;
+  getFormValues: () => MedicalRecordFormValues;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState<ClinicalDocumentType | null>(null);
@@ -59,6 +63,11 @@ export function RecordDocuments({
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
+        <ClinicalDocumentationAssistant
+          appointmentId={appointmentId}
+          canCreate={canCreate}
+          getFormValues={getFormValues}
+        />
         {documents.length ? (
           <div className="space-y-2">
             {documents.map((document) => (

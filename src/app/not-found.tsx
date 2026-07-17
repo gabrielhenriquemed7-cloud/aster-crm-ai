@@ -1,3 +1,5 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-export default function NotFound() { return <main className="grid min-h-dvh place-items-center bg-background p-6 text-center"><div><p className="text-sm text-muted-foreground">404</p><h1 className="mt-2 text-3xl font-semibold">Página não encontrada</h1><p className="mt-3 text-sm text-muted-foreground">Verifique o endereço ou retorne ao painel.</p><Button render={<Link href="/dashboard" />} className="mt-6">Ir para o dashboard</Button></div></main>; }
+import { EmptyState } from "@/components/ui/empty-state";
+
+export default function NotFound() { return <main className="grid min-h-dvh place-items-center bg-background p-6"><EmptyState className="w-full max-w-xl border-0" title="Página não encontrada" description="O endereço informado não existe ou não está mais disponível." icon={<span className="text-sm font-bold">404</span>} action={<Button render={<Link href="/dashboard" />}>Ir para o dashboard</Button>} /></main>; }

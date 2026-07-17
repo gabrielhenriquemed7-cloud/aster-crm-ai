@@ -189,7 +189,7 @@ export function Sidebar({
       {!mobileOnly && (
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-40 hidden border-r border-white/10 transition-[width] duration-200 lg:block",
+            "fixed inset-y-0 left-0 z-40 hidden border-r border-white/10 transition-[width] duration-200 ease-out lg:block",
             collapsed ? "w-20" : "w-64",
           )}
         >

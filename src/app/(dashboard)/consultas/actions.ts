@@ -81,7 +81,21 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     .eq("id", appointmentId)
     .eq("clinic_id", current.clinicId)
     .maybeSingle();
-  if (appointmentError || !appointment) return null;
+  if (appointmentError) {
+    console.error("medical record appointment load failed", {
+      message: appointmentError.message,
+      details: appointmentError.details,
+      hint: appointmentError.hint,
+      code: appointmentError.code,
+    });
+    return {
+      error: "Não foi possível carregar os dados da consulta.",
+      appointment: null,
+      record: null,
+      canEdit: false,
+    };
+  }
+  if (!appointment) return null;
 
   const [
     { data: professional },

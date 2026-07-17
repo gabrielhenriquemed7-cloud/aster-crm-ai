@@ -2,6 +2,7 @@ import { AlertCircle } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { getMedicalRecordPageData } from "@/app/(dashboard)/consultas/actions";
+import { MedicalRecordLayout } from "@/components/medical-records/medical-record-layout";
 import { MedicalRecordForm } from "@/components/medical-records/medical-record-form";
 
 export default async function MedicalRecordPage({
@@ -24,15 +25,17 @@ export default async function MedicalRecordPage({
     );
   }
   return (
-    <MedicalRecordForm
-      appointment={data.appointment}
-      record={data.record}
-      history={data.history}
-      patientDocuments={data.patientDocuments}
-      canEdit={data.canEdit}
-      aiEnabled={data.aiEnabled}
-      canManageAi={data.canManageAi}
-      initialLongitudinalSummary={data.longitudinalSummary}
-    />
+    <MedicalRecordLayout>
+      <MedicalRecordForm
+        appointment={data.appointment}
+        record={data.record}
+        history={data.history}
+        patientDocuments={data.patientDocuments}
+        canEdit={data.canEdit}
+        aiEnabled={data.aiEnabled}
+        canManageAi={data.canManageAi}
+        initialLongitudinalSummary={data.longitudinalSummary}
+      />
+    </MedicalRecordLayout>
   );
 }

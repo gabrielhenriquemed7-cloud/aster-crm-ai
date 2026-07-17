@@ -11,6 +11,7 @@ import { SearchBar } from "@/components/layout/search-bar";
 import { Sidebar } from "@/components/layout/sidebar";
 import { UserMenu } from "@/components/layout/user-menu";
 import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 
 export function Header() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -24,7 +25,7 @@ export function Header() {
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/65">
+    <header className="sticky top-0 z-30 border-b bg-background/90 shadow-xs backdrop-blur supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 sm:px-6 lg:px-8">
         <Sidebar mobileOnly />
         <div className="hidden sm:block"><ClinicSwitcher /></div>
@@ -65,6 +66,7 @@ export function Header() {
           <UserMenu />
         </div>
       </div>
+      <Breadcrumbs />
     </header>
   );
 }
