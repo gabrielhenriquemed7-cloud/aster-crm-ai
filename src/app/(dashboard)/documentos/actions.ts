@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { clinicalDocumentTypes, type ClinicalDocument, type ClinicalDocumentType, type PrescriptionItem } from "@/lib/clinical-documents/types";
+import { clinicalDocumentTypes, type ClinicalDocument, type ClinicalDocumentType, type OfficialClinicalDocumentSnapshot, type PrescriptionItem } from "@/lib/clinical-documents/types";
 import { createClient } from "@/lib/supabase/server";
 
 const uuid = z.string().uuid();
@@ -89,6 +89,64 @@ export async function getClinicalDocument(id: string) {
   const documentResult = await c.supabase.from("clinical_documents").select("*, patient:patients(full_name,social_name,cpf,birth_date)").eq("id", id).eq("clinic_id", c.clinicId).is("deleted_at", null).maybeSingle();
   if (documentResult.error) { logDocumentError("load_document", documentResult.error); return null; }
   const data = documentResult.data; if (!data) return null;
+  const snapshot = data.snapshot_json as OfficialClinicalDocumentSnapshot | null;
+  if (data.status !== "draft" && snapshot) {
+    const audit = await c.supabase.rpc("record_clinical_document_access", {
+      target_document_id: id,
+      access_event: "viewed",
+    });
+    if (audit.error) logDocumentError("audit_view", audit.error);
+    const snapshotLogoPath = snapshot.clinic?.logo_url ?? null;
+    let snapshotLogoUrl: string | null = null;
+    if (snapshotLogoPath?.startsWith("http://") || snapshotLogoPath?.startsWith("https://")) {
+      snapshotLogoUrl = snapshotLogoPath;
+    } else if (snapshotLogoPath?.startsWith(`clinics/${c.clinicId}/logo/`)) {
+      const signed = await c.supabase.storage.from("clinic-assets").createSignedUrl(snapshotLogoPath, 3600);
+      snapshotLogoUrl = signed.data?.signedUrl ?? null;
+      if (signed.error) logDocumentLogoError(snapshotLogoPath, snapshotLogoUrl, signed.error);
+    }
+    return {
+      ...data,
+      snapshot_json: snapshot,
+      patient: {
+        full_name: snapshot.patient?.legal_name ?? snapshot.patient?.name ?? "Paciente",
+        social_name: snapshot.patient?.name ?? null,
+        cpf: snapshot.patient?.cpf ?? null,
+        birth_date: snapshot.patient?.birth_date ?? null,
+      },
+      professional: {
+        full_name: snapshot.professional?.legal_name ?? snapshot.professional?.name ?? null,
+        professional_name: snapshot.professional?.name ?? null,
+        profession: snapshot.professional?.profession ?? null,
+        council: snapshot.professional?.council ?? null,
+        council_number: snapshot.professional?.council_number ?? null,
+        council_state: snapshot.professional?.council_state ?? null,
+        specialty: snapshot.professional?.specialty ?? null,
+        rqe: snapshot.professional?.rqe ?? null,
+        signature_url: null,
+        stamp_url: null,
+      },
+      clinic: {
+        name: snapshot.clinic?.name ?? "Clínica",
+        legal_name: snapshot.clinic?.legal_name ?? null,
+        cnpj: snapshot.clinic?.cnpj ?? null,
+        email: snapshot.clinic?.email ?? null,
+        phone: snapshot.clinic?.phone ?? null,
+        whatsapp: snapshot.clinic?.whatsapp ?? null,
+        address: snapshot.clinic?.address ?? null,
+        address_number: snapshot.clinic?.address_number ?? null,
+        address_complement: snapshot.clinic?.address_complement ?? null,
+        neighborhood: snapshot.clinic?.neighborhood ?? null,
+        city: snapshot.clinic?.city ?? null,
+        state: snapshot.clinic?.state ?? null,
+        zip_code: snapshot.clinic?.zip_code ?? null,
+        logo_path: snapshotLogoPath,
+        logo_url: snapshotLogoUrl,
+      },
+      document_settings: snapshot.document_settings ?? null,
+      items: snapshot.prescription?.items ?? [],
+    } as ClinicalDocument;
+  }
   const [profileResult, professionalResult, clinicResult, itemsResult, settingsResult] = await Promise.all([
     c.supabase.from("profiles").select("full_name").eq("id", data.professional_id).maybeSingle(),
     c.supabase.from("professional_profiles").select("professional_name,profession,council,council_number,council_state,specialty,rqe,signature_url,stamp_url").eq("clinic_id", c.clinicId).eq("user_id", data.professional_id).maybeSingle(),
@@ -152,7 +210,7 @@ export async function issueClinicalDocument(id: string) {
   if (issued.error) return logDocumentError("issue", issued.error);
   const confirmation = await c.supabase.from("clinical_documents").select("status,issued_at").eq("id", id).eq("clinic_id", c.clinicId).maybeSingle();
   if (confirmation.error) return logDocumentError("confirm_issue", confirmation.error);
-  if (confirmation.data?.status !== "issued" || !confirmation.data.issued_at) return logDocumentError("confirm_issue", { code: "DOCUMENT_NOT_ISSUED", message: "A emissão não alterou status e issued_at." });
+  if (confirmation.data?.status !== "finalized" || !confirmation.data.issued_at) return logDocumentError("confirm_issue", { code: "DOCUMENT_NOT_FINALIZED", message: "A emissão não finalizou o documento oficial." });
   refresh(before.data.appointment_id, id); return { success: "Documento emitido." };
 }
 

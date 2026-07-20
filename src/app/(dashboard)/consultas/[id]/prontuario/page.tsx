@@ -2,8 +2,9 @@ import { AlertCircle } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { getMedicalRecordPageData } from "@/app/(dashboard)/consultas/actions";
-import { MedicalRecordLayout } from "@/components/medical-records/medical-record-layout";
 import { MedicalRecordForm } from "@/components/medical-records/medical-record-form";
+import { WorkspaceLayout } from "@/components/clinical-workspace/workspace-layout";
+import { WorkspaceProvider } from "@/components/clinical-workspace/workspace-provider";
 
 export default async function MedicalRecordPage({
   params,
@@ -25,17 +26,31 @@ export default async function MedicalRecordPage({
     );
   }
   return (
-    <MedicalRecordLayout>
-      <MedicalRecordForm
-        appointment={data.appointment}
-        record={data.record}
-        history={data.history}
-        patientDocuments={data.patientDocuments}
-        canEdit={data.canEdit}
-        aiEnabled={data.aiEnabled}
-        canManageAi={data.canManageAi}
-        initialLongitudinalSummary={data.longitudinalSummary}
-      />
-    </MedicalRecordLayout>
+    <WorkspaceProvider
+      identity={{
+        appointmentId: data.appointment.id,
+        patientId: data.appointment.patient_id,
+        patientName:
+          data.appointment.patient?.social_name ||
+          data.appointment.patient?.full_name ||
+          "Paciente",
+        appointmentStatus: data.record?.status || data.appointment.status,
+      }}
+    >
+      <WorkspaceLayout>
+        <MedicalRecordForm
+          appointment={data.appointment}
+          record={data.record}
+          history={data.history}
+          patientDocuments={data.patientDocuments}
+          canEdit={data.canEdit}
+          aiEnabled={data.aiEnabled}
+          canManageAi={data.canManageAi}
+          initialLongitudinalSummary={data.longitudinalSummary}
+          clinicIdentity={data.clinicIdentity}
+          professionalProfile={data.professionalProfile}
+        />
+      </WorkspaceLayout>
+    </WorkspaceProvider>
   );
 }

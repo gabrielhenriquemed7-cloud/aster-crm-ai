@@ -66,7 +66,7 @@ export async function getLongitudinalDashboardData(patientId: string): Promise<L
   const [{ data: records }, { data: appointments }, { data: documents }] = await Promise.all([
     supabase.from("medical_records").select("*").eq("clinic_id", clinicId).eq("patient_id", patientId).is("deleted_at", null).order("created_at", { ascending: false }).limit(500),
     supabase.from("appointments").select("id,appointment_date,start_time,title,status,professional_id").eq("clinic_id", clinicId).eq("patient_id", patientId).order("appointment_date", { ascending: false }).order("start_time", { ascending: false }).limit(500),
-    supabase.from("clinical_documents").select("id,appointment_id,document_type,title,status,issued_at,created_at,content,prescription_items(medication_name,dosage,frequency,duration)").eq("clinic_id", clinicId).eq("patient_id", patientId).is("deleted_at", null).order("created_at", { ascending: false }).limit(500),
+    supabase.from("clinical_documents").select("id,appointment_id,document_type,title,status,issued_at,created_at,snapshot_json,content,prescription_items(medication_name,dosage,frequency,duration)").eq("clinic_id", clinicId).eq("patient_id", patientId).is("deleted_at", null).order("created_at", { ascending: false }).limit(500),
   ]);
   const professionalIds = [...new Set((appointments ?? []).map((item) => item.professional_id))];
   const { data: professionals } = professionalIds.length ? await supabase.from("profiles").select("id,full_name").in("id", professionalIds) : { data: [] };
@@ -78,7 +78,28 @@ export async function getLongitudinalDashboardData(patientId: string): Promise<L
     return [{ ...record, appointment_date: appointment.appointment_date, start_time: appointment.start_time, title: appointment.title, professional_name: professionalMap.get(appointment.professional_id) || "Profissional" } as RecordRow];
   }).sort((a, b) => `${b.appointment_date} ${b.start_time}`.localeCompare(`${a.appointment_date} ${a.start_time}`));
   const visits: LongitudinalVisit[] = history.map((record) => ({ id: record.id, appointmentId: record.appointment_id, date: record.appointment_date, time: record.start_time, title: record.title, status: record.status, professionalName: record.professional_name, assessment: record.assessment, cid10: record.cid10, prescription: record.prescription, examRequests: record.exam_requests }));
-  const normalizedDocuments: LongitudinalDocument[] = (documents ?? []).map((document) => ({ id: document.id, appointmentId: document.appointment_id, type: document.document_type, title: document.title, status: document.status, date: document.issued_at || document.created_at, content: (document.content || {}) as Record<string, unknown>, items: Array.isArray(document.prescription_items) ? document.prescription_items : [] }));
+  const normalizedDocuments: LongitudinalDocument[] = (documents ?? []).map((document) => {
+    const snapshot = (document.snapshot_json || {}) as {
+      prescription?: { items?: LongitudinalDocument["items"]; presentation?: { medications?: Array<{ name:string }> } };
+    };
+    const snapshotItems = snapshot.prescription?.items;
+    const presentationItems = snapshot.prescription?.presentation?.medications?.map((item) => ({
+      medication_name:item.name,
+      dosage:null,
+      frequency:null,
+      duration:null,
+    }));
+    return {
+      id: document.id,
+      appointmentId: document.appointment_id,
+      type: document.document_type,
+      title: document.title,
+      status: document.status,
+      date: document.issued_at || document.created_at,
+      content: (document.snapshot_json || document.content || {}) as Record<string, unknown>,
+      items: snapshotItems?.length ? snapshotItems : presentationItems?.length ? presentationItems : Array.isArray(document.prescription_items) ? document.prescription_items : [],
+    };
+  });
   const timeline = buildPatientTimelineEvents(history, normalizedDocuments.map((document) => ({ id: document.id, title: document.title, document_type: document.type, status: document.status, issued_at: document.date, created_at: document.date })));
   const measurements = history.flatMap(parseMeasurements).sort((a, b) => b.measuredAt.localeCompare(a.measuredAt));
   const diagnosisCounts = new Map<string, number>();

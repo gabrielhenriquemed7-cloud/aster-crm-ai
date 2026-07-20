@@ -94,8 +94,9 @@ export function PatientClinicalTimeline({
   }, [debouncedQuery, events, filter]);
 
   const latestConsultation = history[0];
-  const latestPrescription = history.find((item) => item.prescription?.trim())
-    ?.prescription;
+  const latestPrescription = history.find((item) =>
+    item.prescription?.trim(),
+  )?.prescription;
   const alert = context.allergies[0] || context.recurringDiagnoses[0] || null;
 
   return (
@@ -107,11 +108,14 @@ export function PatientClinicalTimeline({
         <div className="flex items-center gap-2">
           <CalendarClock className="size-5 text-primary" aria-hidden="true" />
           <h2 id="patient-timeline-title" className="font-semibold">
-            Timeline clínica
+            Histórico Clínico
           </h2>
         </div>
         <span className="text-sm text-muted-foreground">
-          Última consulta: {latestConsultation ? formatDate(latestConsultation.appointment_date) : "—"}
+          Último atendimento:{" "}
+          {latestConsultation
+            ? formatDate(latestConsultation.appointment_date)
+            : "—"}
         </span>
         <span className="text-sm text-muted-foreground">
           {history.length} atendimento(s) anterior(es)
@@ -146,7 +150,15 @@ export function PatientClinicalTimeline({
             className={`transition-transform ${expanded ? "rotate-180" : ""}`}
           />
         </Button>
-        <Button type="button" size="sm" variant="ghost" render={<Link href={`/patients/${appointment.patient_id}/longitudinal`} />} nativeButton={false}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          render={
+            <Link href={`/patients/${appointment.patient_id}/longitudinal`} />
+          }
+          nativeButton={false}
+        >
           Visão longitudinal
         </Button>
       </div>
@@ -154,10 +166,19 @@ export function PatientClinicalTimeline({
       {expanded && (
         <div id="patient-timeline-content" className="space-y-4 border-t p-4">
           <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-lg bg-muted/35 p-3 text-sm">
-            <span><strong>Alergias:</strong> {context.allergies.join("; ") || "Não registradas"}</span>
-            <span><strong>Uso contínuo:</strong> {context.continuousMedications.join("; ") || "Não registrado"}</span>
+            <span>
+              <strong>Alergias:</strong>{" "}
+              {context.allergies.join("; ") || "Não registradas"}
+            </span>
+            <span>
+              <strong>Uso contínuo:</strong>{" "}
+              {context.continuousMedications.join("; ") || "Não registrado"}
+            </span>
             {context.recurringDiagnoses.length > 0 && (
-              <span><strong>Diagnósticos recorrentes:</strong> {context.recurringDiagnoses.join("; ")}</span>
+              <span>
+                <strong>Diagnósticos recorrentes:</strong>{" "}
+                {context.recurringDiagnoses.join("; ")}
+              </span>
             )}
           </div>
 
@@ -176,7 +197,10 @@ export function PatientClinicalTimeline({
                 className="h-9 w-full rounded-md border bg-background pr-3 pl-9 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               />
             </label>
-            <div className="flex gap-1 overflow-x-auto pb-1" aria-label="Filtrar timeline">
+            <div
+              className="flex gap-1 overflow-x-auto pb-1"
+              aria-label="Filtrar timeline"
+            >
               {filters.map((item) => (
                 <Button
                   key={item.value}
@@ -215,10 +239,13 @@ export function PatientClinicalTimeline({
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold">
-                          {formatDate(event.date)}{event.time ? ` • ${event.time}` : ""} — {event.title}
+                          {formatDate(event.date)}
+                          {event.time ? ` • ${event.time}` : ""} — {event.title}
                         </span>
                         <span className="block truncate text-xs text-muted-foreground">
-                          {[event.professional, event.status].filter(Boolean).join(" • ")}
+                          {[event.professional, event.status]
+                            .filter(Boolean)
+                            .join(" • ")}
                         </span>
                       </span>
                       <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
@@ -226,8 +253,12 @@ export function PatientClinicalTimeline({
                     <div className="space-y-3 border-t p-3">
                       {event.details.map((detail) => (
                         <div key={`${event.id}:${detail.label}`}>
-                          <p className="text-xs font-semibold text-muted-foreground">{detail.label}</p>
-                          <p className="mt-1 whitespace-pre-wrap text-sm">{detail.value}</p>
+                          <p className="text-xs font-semibold text-muted-foreground">
+                            {detail.label}
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap text-sm">
+                            {detail.value}
+                          </p>
                         </div>
                       ))}
                       {event.href && (
@@ -249,7 +280,11 @@ export function PatientClinicalTimeline({
           )}
 
           {visibleCount < filtered.length && (
-            <Button type="button" variant="outline" onClick={() => setVisibleCount((count) => count + 10)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setVisibleCount((count) => count + 10)}
+            >
               Carregar mais
             </Button>
           )}

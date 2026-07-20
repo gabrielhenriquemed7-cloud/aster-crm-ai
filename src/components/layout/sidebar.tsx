@@ -37,10 +37,12 @@ interface NavigationItem {
 }
 
 interface SidebarProps {
+  mode?: "expanded" | "compact" | "icons";
   collapsed?: boolean;
   desktopOnly?: boolean;
   mobileOnly?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  onModeChange?: (mode: "expanded" | "compact" | "icons") => void;
 }
 
 const navigationItems: NavigationItem[] = [
@@ -79,25 +81,31 @@ function Brand({ collapsed }: { collapsed: boolean }) {
 interface SidebarContentProps {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  mode?: "expanded" | "compact" | "icons";
+  onModeChange?: (mode: "expanded" | "compact" | "icons") => void;
   onNavigate?: () => void;
 }
 
 function SidebarContent({
   collapsed = false,
   onCollapsedChange,
+  mode = "compact",
+  onModeChange,
   onNavigate,
 }: SidebarContentProps) {
+  const nextMode =
+    mode === "expanded" ? "compact" : mode === "compact" ? "icons" : "expanded";
   return (
-    <div className="flex h-full flex-col bg-[#0b1f3a] p-3 text-white">
+    <div className="flex h-full flex-col bg-[#0b1f3a] p-2 text-white">
       <div
         className={cn(
-          "flex h-11 items-center px-2",
+          "flex h-10 items-center px-2",
           collapsed && "justify-center px-0",
         )}
       >
         <Brand collapsed={collapsed} />
       </div>
-      <div className={cn("mt-5 px-1", collapsed && "hidden")}>
+      <div className={cn("mt-2 px-1", collapsed && "hidden")}>
         <Button
           variant="outline"
           className="w-full justify-between border-white/15 bg-white/10 text-white hover:bg-white/15 hover:text-white"
@@ -108,7 +116,7 @@ function SidebarContent({
         </Button>
       </div>
       <nav
-        className="mt-6 flex-1 space-y-1 overflow-y-auto px-1"
+        className="mt-3 flex-1 space-y-0.5 overflow-y-auto px-1"
         aria-label="Navegação principal"
       >
         {navigationItems.map((item) => (
@@ -122,10 +130,10 @@ function SidebarContent({
       </nav>
       <div
         className={cn(
-          "mt-4",
+          "mt-2",
           collapsed
             ? "flex justify-center"
-            : "rounded-lg border border-white/10 bg-white/5 p-3",
+            : "rounded-lg border border-white/10 bg-white/5 p-2.5",
         )}
       >
         {collapsed ? (
@@ -173,6 +181,7 @@ function SidebarContent({
                   rel="noopener noreferrer"
                 />
               }
+              nativeButton={false}
               size="sm"
               className="mt-2 w-full bg-warning text-warning-foreground transition-colors duration-200 hover:bg-warning/90"
             >
@@ -182,17 +191,24 @@ function SidebarContent({
           </>
         )}
       </div>
-      {onCollapsedChange && (
+      {(onModeChange || onCollapsedChange) && (
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => onCollapsedChange(!collapsed)}
+          onClick={() => {
+            if (onModeChange) onModeChange(nextMode);
+            else onCollapsedChange?.(!collapsed);
+          }}
           className={cn(
-            "mt-3 text-blue-100 hover:bg-white/10 hover:text-white",
+            "mt-2 text-blue-100 hover:bg-white/10 hover:text-white",
             collapsed ? "mx-auto size-8 p-0" : "w-full justify-start",
           )}
           aria-label={
-            collapsed ? "Expandir barra lateral" : "Recolher barra lateral"
+            onModeChange
+              ? `Alternar menu para modo ${nextMode}`
+              : collapsed
+                ? "Expandir barra lateral"
+                : "Recolher barra lateral"
           }
         >
           {collapsed ? (
@@ -210,11 +226,14 @@ function SidebarContent({
 }
 
 export function Sidebar({
+  mode = "compact",
   collapsed = false,
   desktopOnly = false,
   mobileOnly = false,
   onCollapsedChange,
+  onModeChange,
 }: SidebarProps) {
+  const isCollapsed = mode === "icons" || collapsed;
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
 
   return (
@@ -223,12 +242,18 @@ export function Sidebar({
         <aside
           className={cn(
             "fixed inset-y-0 left-0 z-40 hidden border-r border-white/10 transition-[width] duration-200 ease-out lg:block",
-            collapsed ? "w-20" : "w-64",
+            mode === "expanded"
+              ? "w-64"
+              : isCollapsed
+                ? "w-16"
+                : "w-56",
           )}
         >
           <SidebarContent
-            collapsed={collapsed}
+            collapsed={isCollapsed}
+            mode={mode}
             onCollapsedChange={onCollapsedChange}
+            onModeChange={onModeChange}
           />
         </aside>
       )}

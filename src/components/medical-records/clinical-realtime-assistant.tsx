@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   Activity,
   Bot,
-  Calculator,
   ChevronDown,
   ChevronUp,
   CirclePause,
@@ -27,7 +26,6 @@ import { Button } from "@/components/ui/button";
 import { ClinicalChat } from "@/components/medical-records/clinical-chat";
 import { ClinicalTimeline } from "@/components/medical-records/clinical-timeline";
 import { IntelligentPrescription } from "@/components/medical-records/intelligent-prescription";
-import { ClinicalScores } from "@/components/medical-records/clinical-scores";
 import type { ClinicalAiSuggestion } from "@/lib/ai/clinical-schema";
 import type { RealtimeClinicalAnalysis } from "@/lib/ai/clinical-realtime-schema";
 import type { ClinicalTimelineEvent } from "@/lib/ai/clinical-timeline-schema";
@@ -45,7 +43,6 @@ const copilotTabs = [
   "chat",
   "prescription",
   "timeline",
-  "scores",
   "documents",
 ] as const;
 type CopilotTab = (typeof copilotTabs)[number];
@@ -59,9 +56,7 @@ function copilotTabLabel(tab: CopilotTab) {
         ? "Prescrição IA"
         : tab === "timeline"
           ? "Timeline"
-          : tab === "scores"
-            ? "Scores Clínicos"
-            : "Documentos";
+          : "Documentos";
 }
 
 function copilotTabIcon(tab: CopilotTab) {
@@ -73,8 +68,6 @@ function copilotTabIcon(tab: CopilotTab) {
     <Pill />
   ) : tab === "timeline" ? (
     <RefreshCw />
-  ) : tab === "scores" ? (
-    <Calculator />
   ) : (
     <Files />
   );
@@ -214,6 +207,23 @@ export function ClinicalRealtimeAssistant({
   const requestSequenceRef = useRef(0);
   const loadingRef = useRef(false);
 
+  useEffect(() => {
+    const openPrescriptionAi = () => {
+      setCollapsed(false);
+      setTab("prescription");
+      onTabChange("prescription");
+    };
+    window.addEventListener(
+      "aster:open-prescription-ai",
+      openPrescriptionAi,
+    );
+    return () =>
+      window.removeEventListener(
+        "aster:open-prescription-ai",
+        openPrescriptionAi,
+      );
+  }, [onTabChange]);
+
   const currentContext = useCallback(() => {
     const values = getFormValues();
     const clinicalContext = buildClinicalContext({
@@ -350,8 +360,7 @@ export function ClinicalRealtimeAssistant({
     context.clinicalContext,
   );
   const stale = Boolean(
-    lastUpdated &&
-      fingerprint(context.serialized) !== analyzedFingerprint,
+    lastUpdated && fingerprint(context.serialized) !== analyzedFingerprint,
   );
   const documentationPendingItems = getDocumentationPendingItems(
     context.values,
@@ -952,16 +961,6 @@ export function ClinicalRealtimeAssistant({
               getFormValues={getFormValues}
               onInsert={onInsertTimeline}
               onEventsChange={setTimelineEvents}
-            />
-          ) : tab === "scores" ? (
-            <ClinicalScores
-              appointmentId={appointmentId}
-              text={text}
-              age={patientAge}
-              gender={patientGender}
-              getFormValues={getFormValues}
-              onInsertConduct={(value) => onInsertTimeline("plan", value)}
-              onInsertTimeline={onInsertTimeline}
             />
           ) : (
             documents

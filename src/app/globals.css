@@ -227,3 +227,14 @@ body {
     animation: none !important;
   }
 }
+@media (min-width: 64rem) {
+  .clinical-resizable-grid {
+    grid-template-columns:
+      var(--clinical-record-track, minmax(0, 70fr))
+      var(--clinical-ai-track, minmax(300px, 30fr));
+  }
+
+  .clinical-resizable-grid--focus {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

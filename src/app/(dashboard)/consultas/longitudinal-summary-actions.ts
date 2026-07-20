@@ -147,7 +147,7 @@ export async function generateLongitudinalSummary(input: unknown) {
       )
       .eq("clinic_id", c.clinicId)
       .eq("patient_id", patient.id)
-      .eq("status", "issued")
+      .in("status", ["finalized", "signed", "archived"])
       .is("deleted_at", null)
       .order("created_at", { ascending: true }),
   ]);

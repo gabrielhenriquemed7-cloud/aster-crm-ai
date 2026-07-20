@@ -12,6 +12,10 @@ import type {
   MedicalRecordAppointment,
   MedicalRecordHistoryItem,
 } from "@/lib/medical-records/types";
+import { generateOfficialClinicalDocumentPdf } from "@/lib/clinical-documents/official-pdf-generator";
+import type { OfficialClinicalDocumentSnapshot } from "@/lib/clinical-documents/types";
+import { buildPrescriptionPresentation } from "@/lib/prescription-engine/presentation";
+import type { PrescriptionDocument } from "@/lib/prescription-engine/types";
 import { createClient } from "@/lib/supabase/server";
 
 type SaveResult = { error?: string; id?: string; success?: string };
@@ -234,9 +238,45 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     .select("id, title, document_type, status, issued_at, created_at")
     .eq("clinic_id", current.clinicId)
     .eq("patient_id", appointment.patient_id)
-    .in("status", ["issued", "cancelled"])
+    .in("status", ["finalized", "signed", "archived", "cancelled"])
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
+  const [
+    { data: scoreResults },
+    { data: professionalProfile },
+    { data: clinicIdentity },
+  ] = await Promise.all([
+    current.supabase
+      .from("clinical_score_results")
+      .select("id, score, result, calculated_at, score_version")
+      .eq("clinic_id", current.clinicId)
+      .eq("appointment_id", appointmentId)
+      .order("calculated_at", { ascending: false }),
+    current.supabase
+      .from("professional_profiles")
+      .select(
+        "professional_name, council, council_number, council_state, specialty",
+      )
+      .eq("clinic_id", current.clinicId)
+      .eq("user_id", appointment.professional_id)
+      .maybeSingle(),
+    current.supabase
+      .from("clinics")
+      .select("name, legal_name, logo_url, phone, email")
+      .eq("id", current.clinicId)
+      .maybeSingle(),
+  ]);
+  let clinicLogoUrl: string | null = null;
+  if (clinicIdentity?.logo_url) {
+    if (/^https?:\/\//.test(clinicIdentity.logo_url)) {
+      clinicLogoUrl = clinicIdentity.logo_url;
+    } else {
+      const { data: signedLogo } = await current.supabase.storage
+        .from("clinic-assets")
+        .createSignedUrl(clinicIdentity.logo_url, 3600);
+      clinicLogoUrl = signedLogo?.signedUrl ?? null;
+    }
+  }
 
   return {
     error: null,
@@ -244,6 +284,11 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     record: (record as MedicalRecord | null) ?? null,
     history,
     patientDocuments: patientDocuments ?? [],
+    scoreResults: scoreResults ?? [],
+    professionalProfile: professionalProfile ?? null,
+    clinicIdentity: clinicIdentity
+      ? { ...clinicIdentity, logo_url: clinicLogoUrl }
+      : null,
     canEdit:
       appointment.professional_id === current.userId &&
       appointment.status === "in_progress" &&
@@ -335,6 +380,114 @@ export async function saveMedicalRecord(
   revalidatePath(`/consultas/${appointmentId}`);
   revalidatePath(`/appointments/${appointmentId}`);
   return { success: "Prontuário salvo com sucesso.", id: result.data.id };
+}
+
+export async function issuePrescriptionFromMedicalRecord(
+  appointmentId: string,
+  values: MedicalRecordFormValues,
+  prescription: PrescriptionDocument,
+  idempotencyKey: string,
+): Promise<SaveResult> {
+  if (!idSchema.safeParse(appointmentId).success)
+    return { error: "Consulta inválida." };
+  const parsedRecord = medicalRecordSchema.safeParse(values);
+  if (!parsedRecord.success)
+    return {
+      error:
+        parsedRecord.error.issues[0]?.message ?? "Dados clínicos inválidos.",
+    };
+  if (!idSchema.safeParse(idempotencyKey).success)
+    return { error: "Não foi possível identificar este rascunho." };
+  if (!prescription.medications.length)
+    return { error: "Adicione ao menos um medicamento antes de emitir." };
+
+  const current = await context();
+  if (current.error) return { error: current.error };
+  const officialPrescriptionSnapshot = {
+    ...prescription,
+    _official_presentation: buildPrescriptionPresentation(prescription),
+  };
+  const { data, error } = await current.supabase.rpc(
+    "issue_prescription_document_atomic",
+    {
+      target_appointment_id: appointmentId,
+      medical_record_payload: recordPayload(parsedRecord.data),
+      prescription_snapshot: officialPrescriptionSnapshot,
+      idempotency_key: idempotencyKey,
+    },
+  );
+  if (error || !data) {
+    console.error("ASTER_PRESCRIPTION_ISSUE_ERROR", {
+      code: error?.code ?? null,
+      message: error?.message ?? null,
+      details: error?.details ?? null,
+      hint: error?.hint ?? null,
+      appointmentId,
+      idempotencyKey,
+    });
+    return {
+      error: `${error?.code ?? "SEM_CODIGO"}: ${
+        error?.message ?? "Não foi possível emitir a receita."
+      }`,
+    };
+  }
+
+  const documentId = String(data);
+  const officialResult = await current.supabase
+    .from("clinical_documents")
+    .select("clinic_id,public_number,content_hash,snapshot_json,pdf_status")
+    .eq("id", documentId)
+    .eq("clinic_id", current.clinicId)
+    .single();
+  if (
+    !officialResult.error &&
+    officialResult.data?.snapshot_json &&
+    officialResult.data.pdf_status !== "available"
+  ) {
+    const snapshot =
+      officialResult.data.snapshot_json as OfficialClinicalDocumentSnapshot;
+    const pdf = generateOfficialClinicalDocumentPdf(snapshot);
+    const hashPrefix = (officialResult.data.content_hash || "unhashed").slice(0, 16);
+    const storagePath = `clinics/${officialResult.data.clinic_id}/documents/${documentId}/document-v${snapshot.document_version}-${hashPrefix}.pdf`;
+    const uploaded = await current.supabase.storage
+      .from("clinical-documents")
+      .upload(storagePath, pdf, {
+        contentType: "application/pdf",
+        upsert: false,
+      });
+    const pdfResult = await current.supabase.rpc(
+      "set_clinical_document_pdf_result",
+      {
+        target_document_id: documentId,
+        storage_path: uploaded.error ? null : storagePath,
+        generation_status: uploaded.error ? "failed" : "available",
+      },
+    );
+    if (uploaded.error || pdfResult.error) {
+      console.error("ASTER_PRESCRIPTION_PDF_ERROR", {
+        documentId,
+        uploadCode: uploaded.error?.name ?? null,
+        uploadMessage: uploaded.error?.message ?? null,
+        databaseCode: pdfResult.error?.code ?? null,
+        databaseMessage: pdfResult.error?.message ?? null,
+      });
+    }
+  } else if (officialResult.error) {
+    console.error("ASTER_PRESCRIPTION_PDF_ERROR", {
+      documentId,
+      databaseCode: officialResult.error.code,
+      databaseMessage: officialResult.error.message,
+    });
+  }
+
+  revalidatePath(`/consultas/${appointmentId}/prontuario`);
+  revalidatePath(`/consultas/${appointmentId}/documentos`);
+  revalidatePath(`/documentos/${documentId}`);
+  revalidatePath(`/documentos/${documentId}/imprimir`);
+  return {
+    success: "Receita emitida e armazenada com sucesso.",
+    id: documentId,
+  };
 }
 
 export async function finalizeClinicalEncounter(

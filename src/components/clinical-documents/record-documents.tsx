@@ -52,7 +52,7 @@ export function RecordDocuments({
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2">
           <Files className="text-primary" />
-          Documentos
+          Central de Documentos
         </CardTitle>
         <Button
           size="sm"
