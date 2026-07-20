@@ -75,6 +75,11 @@ export interface PrescriptionDocument {
   signaturePlaceholder: string;
 }
 
+export type PrescriptionDraft = Pick<
+  PrescriptionDocument,
+  "id" | "type" | "medications" | "orientations" | "observations"
+>;
+
 export type PrescriptionAlertKind =
   | "allergy"
   | "interaction"

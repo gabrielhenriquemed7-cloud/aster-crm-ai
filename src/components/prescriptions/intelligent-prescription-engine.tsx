@@ -48,6 +48,7 @@ import { optionsForForm } from "@/lib/prescription-engine/structured-options";
 import { favoritePrescriptionTemplates } from "@/lib/prescription-engine/templates";
 import type {
   PrescriptionDocument,
+  PrescriptionDraft,
   PrescriptionMedication,
   PrescriptionTemplate,
 } from "@/lib/prescription-engine/types";
@@ -62,20 +63,24 @@ type LibraryPanel = "favorites" | "recent" | "protocols" | null;
 export function IntelligentPrescriptionEngine({
   disabled,
   currentValue,
+  initialDraft,
   identity,
   onCommitDraft,
+  onDraftChange,
   onIssue,
 }: {
   disabled: boolean;
   currentValue: string;
+  initialDraft?: PrescriptionDraft | null;
   identity: Identity;
   onCommitDraft: (value: string) => void;
+  onDraftChange: (draft: PrescriptionDraft) => Promise<void>;
   onIssue: (
     document: PrescriptionDocument,
     idempotencyKey: string,
   ) => Promise<{ error?: string; id?: string }>;
 }) {
-  const engine = usePrescriptionEngine(identity);
+  const engine = usePrescriptionEngine(identity, initialDraft);
   const [open, setOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [panel, setPanel] = useState<LibraryPanel>(null);
@@ -90,9 +95,30 @@ export function IntelligentPrescriptionEngine({
   const [issueError, setIssueError] = useState("");
   const [issuedDocumentId, setIssuedDocumentId] = useState<string | null>(null);
   const committedPreview = useRef("");
+  const draftChangeCallback = useRef(onDraftChange);
   const idempotencyKey = useRef(crypto.randomUUID());
   const issuing = useRef(false);
   const catalog = useMedicationCatalogSearch(search);
+
+  useEffect(() => {
+    draftChangeCallback.current = onDraftChange;
+  }, [onDraftChange]);
+
+  useEffect(() => {
+    if (disabled) return;
+    const timer = window.setTimeout(
+      () =>
+        void draftChangeCallback.current({
+          id: engine.document.id,
+          type: engine.document.type,
+          medications: engine.document.medications,
+          orientations: engine.document.orientations,
+          observations: engine.document.observations,
+        }),
+      800,
+    );
+    return () => window.clearTimeout(timer);
+  }, [disabled, engine.document]);
 
   useEffect(() => {
     if (!engine.document.medications.length) {

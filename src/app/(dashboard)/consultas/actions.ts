@@ -20,6 +20,41 @@ import { createClient } from "@/lib/supabase/server";
 
 type SaveResult = { error?: string; id?: string; success?: string };
 const idSchema = z.string().uuid();
+const prescriptionMedicationSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().max(500),
+  activeIngredient: z.string().max(500),
+  concentration: z.string().max(300),
+  pharmaceuticalForm: z.string().max(500),
+  route: z.string().max(300),
+  dose: z.string().max(300),
+  frequency: z.string().max(300),
+  interval: z.string().max(300),
+  schedule: z.string().max(500),
+  duration: z.string().max(300),
+  quantity: z.string().max(300),
+  notes: z.string().max(4000),
+  posologyMode: z.enum([
+    "single_use",
+    "continuous",
+    "as_needed",
+    "alternate_days",
+    "custom_schedule",
+  ]),
+}).passthrough();
+const prescriptionDraftSchema = z.object({
+  id: z.string().uuid(),
+  type: z.enum([
+    "simple",
+    "continuous",
+    "antimicrobial",
+    "special_control",
+    "digital",
+  ]),
+  medications: z.array(prescriptionMedicationSchema).max(100),
+  orientations: z.string().max(12000),
+  observations: z.string().max(12000),
+});
 
 function nullable(value?: string) {
   const normalized = value?.trim();
@@ -382,6 +417,78 @@ export async function saveMedicalRecord(
   return { success: "Prontuário salvo com sucesso.", id: result.data.id };
 }
 
+export async function savePrescriptionDraft(
+  appointmentId: string,
+  draft: unknown,
+): Promise<SaveResult> {
+  if (!idSchema.safeParse(appointmentId).success)
+    return { error: "Consulta inválida." };
+  const parsed = prescriptionDraftSchema.safeParse(draft);
+  if (!parsed.success)
+    return { error: "O rascunho estruturado da Prescrição é inválido." };
+  const current = await context();
+  if (current.error) return { error: current.error };
+
+  const { data: appointment, error: appointmentError } = await current.supabase
+    .from("appointments")
+    .select("id,professional_id,status")
+    .eq("id", appointmentId)
+    .eq("clinic_id", current.clinicId)
+    .maybeSingle();
+  if (appointmentError || !appointment)
+    return { error: "Consulta não encontrada na clínica ativa." };
+  if (appointment.professional_id !== current.userId)
+    return { error: "Somente o profissional da consulta pode editar a Prescrição." };
+  if (appointment.status !== "in_progress")
+    return {
+      error:
+        "Esta consulta já foi finalizada e não pode ser alterada diretamente. Para registrar novas informações, crie um adendo ou um novo atendimento.",
+    };
+
+  const { data: record, error: recordError } = await current.supabase
+    .from("medical_records")
+    .select("id,status")
+    .eq("appointment_id", appointmentId)
+    .eq("clinic_id", current.clinicId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (recordError)
+    return { error: "Não foi possível verificar o prontuário da consulta." };
+  if (record && record.status !== "draft")
+    return {
+      error:
+        "Esta consulta já foi finalizada e não pode ser alterada diretamente. Para registrar novas informações, crie um adendo ou um novo atendimento.",
+    };
+
+  const result = record
+    ? await current.supabase
+        .from("medical_records")
+        .update({ prescription_draft: parsed.data })
+        .eq("id", record.id)
+        .eq("status", "draft")
+        .select("id")
+        .single()
+    : await current.supabase
+        .from("medical_records")
+        .insert({
+          appointment_id: appointmentId,
+          prescription_draft: parsed.data,
+        })
+        .select("id")
+        .single();
+  if (result.error || !result.data) {
+    console.error("ASTER_PRESCRIPTION_DRAFT_SAVE_ERROR", {
+      code: result.error?.code ?? null,
+      message: result.error?.message ?? null,
+      details: result.error?.details ?? null,
+      appointmentId,
+    });
+    return { error: "Não foi possível salvar o rascunho da Prescrição." };
+  }
+  revalidatePath(`/consultas/${appointmentId}/prontuario`);
+  return { success: "Rascunho da Prescrição salvo.", id: result.data.id };
+}
+
 export async function issuePrescriptionFromMedicalRecord(
   appointmentId: string,
   values: MedicalRecordFormValues,
@@ -403,6 +510,14 @@ export async function issuePrescriptionFromMedicalRecord(
 
   const current = await context();
   if (current.error) return { error: current.error };
+  const draftResult = await savePrescriptionDraft(appointmentId, {
+    id: prescription.id,
+    type: prescription.type,
+    medications: prescription.medications,
+    orientations: prescription.orientations,
+    observations: prescription.observations,
+  });
+  if (draftResult.error) return { error: draftResult.error };
   const officialPrescriptionSnapshot = {
     ...prescription,
     _official_presentation: buildPrescriptionPresentation(prescription),

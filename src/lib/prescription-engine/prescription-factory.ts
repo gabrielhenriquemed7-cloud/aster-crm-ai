@@ -1,5 +1,6 @@
 import type {
   PrescriptionDocument,
+  PrescriptionDraft,
   PrescriptionMedication,
   PrescriptionTemplate,
 } from "@/lib/prescription-engine/types";
@@ -24,6 +25,21 @@ export function createEmptyMedication(): PrescriptionMedication {
 }
 
 export class PrescriptionFactory {
+  static fromDraft(
+    draft: PrescriptionDraft,
+    identity: Omit<
+      PrescriptionDocument,
+      "id" | "status" | "type" | "medications" | "orientations" | "observations"
+    >,
+  ): PrescriptionDocument {
+    return {
+      ...identity,
+      ...draft,
+      status: "draft",
+      medications: draft.medications.map((item) => ({ ...item })),
+    };
+  }
+
   static fromTemplate(
     template: PrescriptionTemplate,
     identity: Omit<

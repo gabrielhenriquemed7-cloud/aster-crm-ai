@@ -33,6 +33,7 @@ import {
   finalizeClinicalEncounter,
   issuePrescriptionFromMedicalRecord,
   saveMedicalRecord,
+  savePrescriptionDraft,
 } from "@/app/(dashboard)/consultas/actions";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -872,7 +873,7 @@ export function MedicalRecordForm({
       {!canEdit && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-200">
           {record?.status === "finalized" || record?.status === "amended"
-            ? "Prontuário finalizado — conteúdo disponível somente para leitura."
+            ? "Esta consulta já foi finalizada e não pode ser alterada diretamente. Para registrar novas informações, crie um adendo ou um novo atendimento."
             : "O prontuário só pode ser editado pelo profissional responsável durante o atendimento."}
         </div>
       )}
@@ -1234,6 +1235,7 @@ export function MedicalRecordForm({
                     <IntelligentPrescriptionEngine
                       disabled={!canEdit}
                       currentValue={prescriptionValue}
+                      initialDraft={record?.prescription_draft}
                       identity={{
                         clinic: {
                           name:
@@ -1270,6 +1272,21 @@ export function MedicalRecordForm({
                           shouldValidate: true,
                         });
                         markFieldReviewed("prescription");
+                      }}
+                      onDraftChange={async (draft) => {
+                        setSaveState("saving");
+                        const result = await savePrescriptionDraft(
+                          appointment.id,
+                          draft,
+                        );
+                        if (result.error) {
+                          setSaveState("error");
+                          setSaveError(result.error);
+                          return;
+                        }
+                        setSaveState("saved");
+                        setSaveError(null);
+                        setLastSavedAt(new Date().toISOString());
                       }}
                       onIssue={async (document, idempotencyKey) => {
                         form.setValue("prescription", document.medications

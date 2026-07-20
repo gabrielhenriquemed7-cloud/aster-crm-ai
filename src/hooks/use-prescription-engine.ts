@@ -7,6 +7,7 @@ import { PrescriptionGenerator } from "@/lib/prescription-engine/prescription-ge
 import { emptyPrescriptionTemplate } from "@/lib/prescription-engine/templates";
 import type {
   PrescriptionDocument,
+  PrescriptionDraft,
   PrescriptionMedication,
   PrescriptionTemplate,
 } from "@/lib/prescription-engine/types";
@@ -16,9 +17,14 @@ type PrescriptionIdentity = Omit<
   "id" | "status" | "type" | "medications" | "orientations" | "observations"
 >;
 
-export function usePrescriptionEngine(identity: PrescriptionIdentity) {
+export function usePrescriptionEngine(
+  identity: PrescriptionIdentity,
+  initialDraft?: PrescriptionDraft | null,
+) {
   const [document, setDocument] = useState(() =>
-    PrescriptionFactory.fromTemplate(emptyPrescriptionTemplate, identity),
+    initialDraft
+      ? PrescriptionFactory.fromDraft(initialDraft, identity)
+      : PrescriptionFactory.fromTemplate(emptyPrescriptionTemplate, identity),
   );
 
   const preview = useMemo(

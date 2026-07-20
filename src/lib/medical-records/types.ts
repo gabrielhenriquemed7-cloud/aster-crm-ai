@@ -16,6 +16,7 @@ export interface MedicalRecord {
   cid10: string | null;
   plan: string | null;
   prescription: string | null;
+  prescription_draft: import("@/lib/prescription-engine/types").PrescriptionDraft | null;
   exam_requests: string | null;
   certificate: string | null;
   return_guidance: string | null;
