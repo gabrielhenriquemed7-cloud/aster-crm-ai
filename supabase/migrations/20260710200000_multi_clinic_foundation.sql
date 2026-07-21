@@ -1,3 +1,5 @@
+begin;
+
 do $$ begin
   create type public.clinic_status as enum ('active', 'inactive', 'suspended');
 exception when duplicate_object then null; end $$;
@@ -56,9 +58,22 @@ insert into public.clinic_members (clinic_id, user_id, role, status, created_by)
 select c.id, u.id, 'clinic_admin', 'active', u.id from unlinked u join new_clinics c using (rn)
 on conflict (clinic_id, user_id) do nothing;
 
-update public.profiles p set active_clinic_id = cm.clinic_id
-from lateral (select clinic_id from public.clinic_members where user_id = p.id and status = 'active' order by created_at limit 1) cm
-where p.active_clinic_id is null;
+update public.profiles p
+set active_clinic_id = (
+  select cm.clinic_id
+  from public.clinic_members cm
+  where cm.user_id = p.id
+    and cm.status = 'active'
+  order by cm.created_at, cm.clinic_id
+  limit 1
+)
+where p.active_clinic_id is null
+  and exists (
+    select 1
+    from public.clinic_members cm
+    where cm.user_id = p.id
+      and cm.status = 'active'
+  );
 
 create or replace function public.is_platform_admin()
 returns boolean language sql stable security definer set search_path = public as $$
@@ -101,31 +116,89 @@ update public.patients p set clinic_id = pr.active_clinic_id from public.profile
 alter table public.patients alter column clinic_id set not null;
 create index if not exists patients_clinic_idx on public.patients(clinic_id, full_name);
 
-do $$ declare table_name text; begin
-  if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'appointments') then
+do $$
+declare
+  target_table_name text;
+begin
+  if exists (
+    select 1
+    from information_schema.tables ist
+    where ist.table_schema = 'public'
+      and ist.table_name = 'appointments'
+  ) then
     alter table public.appointments add column if not exists clinic_id uuid references public.clinics(id) on delete restrict;
-    update public.appointments a set clinic_id = p.active_clinic_id from public.profiles p where p.id = a.user_id and a.clinic_id is null;
+
+    if exists (
+      select 1
+      from information_schema.columns isc
+      where isc.table_schema = 'public'
+        and isc.table_name = 'appointments'
+        and isc.column_name = 'user_id'
+    ) then
+      execute $sql$
+        update public.appointments a
+        set clinic_id = p.active_clinic_id
+        from public.profiles p
+        where p.id = a.user_id
+          and a.clinic_id is null
+      $sql$;
+    end if;
+
     alter table public.appointments alter column clinic_id set not null;
-    create index if not exists appointments_clinic_starts_idx on public.appointments(clinic_id, starts_at);
+
+    if exists (
+      select 1
+      from information_schema.columns isc
+      where isc.table_schema = 'public'
+        and isc.table_name = 'appointments'
+        and isc.column_name = 'starts_at'
+    ) then
+      execute 'create index if not exists appointments_clinic_starts_idx on public.appointments(clinic_id, starts_at)';
+    end if;
   end if;
-  foreach table_name in array array['medical_records', 'prescriptions', 'financial_transactions'] loop
-    if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = table_name) then execute format('alter table public.%I add column if not exists clinic_id uuid references public.clinics(id) on delete restrict', table_name); end if;
+
+  foreach target_table_name in array array['medical_records', 'prescriptions', 'financial_transactions'] loop
+    if exists (
+      select 1
+      from information_schema.tables ist
+      where ist.table_schema = 'public'
+        and ist.table_name = target_table_name
+    ) then
+      execute format(
+        'alter table public.%I add column if not exists clinic_id uuid references public.clinics(id) on delete restrict',
+        target_table_name
+      );
+    end if;
   end loop;
-end $$;
+end
+$$;
 
 alter table public.clinics enable row level security; alter table public.clinic_members enable row level security; alter table public.clinic_audit_logs enable row level security;
 drop policy if exists "Users update their own profile" on public.profiles;
+drop policy if exists "Users update their own profile except active clinic" on public.profiles;
 create policy "Users update their own profile except active clinic" on public.profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid() and active_clinic_id is not distinct from (select active_clinic_id from public.profiles where id = auth.uid()));
 drop policy if exists "Users manage their own patients" on public.patients;
+drop policy if exists "Clinic isolation for patients" on public.patients;
 create policy "Clinic isolation for patients" on public.patients for all to authenticated using (public.is_active_clinic_member(clinic_id)) with check (public.is_active_clinic_member(clinic_id));
 drop policy if exists "Users manage their own appointments" on public.appointments;
+drop policy if exists "Clinic isolation for appointments" on public.appointments;
 create policy "Clinic isolation for appointments" on public.appointments for all to authenticated using (public.is_active_clinic_member(clinic_id)) with check (public.is_active_clinic_member(clinic_id));
+drop policy if exists "Read member clinics" on public.clinics;
 create policy "Read member clinics" on public.clinics for select to authenticated using (public.is_platform_admin() or exists (select 1 from public.clinic_members cm where cm.clinic_id = clinics.id and cm.user_id = auth.uid() and cm.status = 'active'));
+drop policy if exists "Create clinic" on public.clinics;
 create policy "Create clinic" on public.clinics for insert to authenticated with check (auth.uid() is not null);
+drop policy if exists "Manage active clinic" on public.clinics;
 create policy "Manage active clinic" on public.clinics for update to authenticated using (id = public.active_clinic_id() and public.is_active_clinic_admin()) with check (id = public.active_clinic_id() and public.is_active_clinic_admin());
+drop policy if exists "Read own or active clinic members" on public.clinic_members;
 create policy "Read own or active clinic members" on public.clinic_members for select to authenticated using (user_id = auth.uid() or clinic_id = public.active_clinic_id() or public.is_platform_admin());
+drop policy if exists "Clinic admins manage members" on public.clinic_members;
 create policy "Clinic admins manage members" on public.clinic_members for all to authenticated using (clinic_id = public.active_clinic_id() and public.is_active_clinic_admin()) with check (clinic_id = public.active_clinic_id() and public.is_active_clinic_admin() and role <> 'platform_admin');
+drop policy if exists "Read active clinic audit" on public.clinic_audit_logs;
 create policy "Read active clinic audit" on public.clinic_audit_logs for select to authenticated using (clinic_id = public.active_clinic_id() and public.is_active_clinic_admin() or public.is_platform_admin());
 
+drop trigger if exists clinics_set_updated_at on public.clinics;
 create trigger clinics_set_updated_at before update on public.clinics for each row execute procedure public.set_updated_at();
+drop trigger if exists clinic_members_set_updated_at on public.clinic_members;
 create trigger clinic_members_set_updated_at before update on public.clinic_members for each row execute procedure public.set_updated_at();
+
+commit;

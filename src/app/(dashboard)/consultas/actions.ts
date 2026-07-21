@@ -551,11 +551,7 @@ export async function issuePrescriptionFromMedicalRecord(
       appointmentId,
       idempotencyKey,
     });
-    return {
-      error: `${error?.code ?? "SEM_CODIGO"}: ${
-        error?.message ?? "Não foi possível emitir a receita."
-      }`,
-    };
+    return { error: "Não foi possível emitir a receita. Revise os dados e tente novamente." };
   }
 
   const documentId = String(data);

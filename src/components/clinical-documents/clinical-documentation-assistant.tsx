@@ -253,7 +253,7 @@ export function ClinicalDocumentationAssistant({ appointmentId, canCreate, getFo
     if (!type) return;
     const created = await createClinicalDocument(appointmentId, type);
     if ("error" in created) return toast.error(created.error);
-    const saved = await saveClinicalDocument(created.id, active.label, { body: active.content, text: active.content }, []);
+    const saved = await saveClinicalDocument(created.id, active.label, { body: active.content, text: active.content }, [], { generatedByAi: true });
     if ("error" in saved) return toast.error(saved.error);
     if (active.generationId) await acceptClinicalAiSections({ generationId: active.generationId, sections: [`documentation:${active.kind}:draft_created`] });
     router.push(`/documentos/${created.id}`);

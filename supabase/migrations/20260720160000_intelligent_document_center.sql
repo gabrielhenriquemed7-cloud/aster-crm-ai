@@ -14,11 +14,45 @@ alter table public.clinical_documents
   add column if not exists signature_provider text,
   add column if not exists signature_metadata jsonb not null default '{}'::jsonb;
 
+-- The tenant trigger requires an authenticated application user. This
+-- administrator-only backfill runs in the SQL Editor, where auth.uid() is null.
+-- Disable only this trigger inside the transaction; rollback restores its prior
+-- enabled state if the backfill or any later statement fails.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_trigger
+    where tgrelid = 'public.clinical_documents'::regclass
+      and tgname = 'clinical_documents_enforce_tenant'
+      and not tgisinternal
+  ) then
+    alter table public.clinical_documents
+      disable trigger clinical_documents_enforce_tenant;
+  end if;
+end
+$$;
+
 update public.clinical_documents
 set reviewed_by_physician = true,
     reviewed_at = coalesce(reviewed_at, issued_at, immutable_at, updated_at),
     reviewed_by = coalesce(reviewed_by, issued_by, professional_id)
 where status in ('finalized', 'signed', 'archived') and not reviewed_by_physician;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_trigger
+    where tgrelid = 'public.clinical_documents'::regclass
+      and tgname = 'clinical_documents_enforce_tenant'
+      and not tgisinternal
+  ) then
+    alter table public.clinical_documents
+      enable trigger clinical_documents_enforce_tenant;
+  end if;
+end
+$$;
 
 alter table public.clinical_documents
   drop constraint if exists clinical_documents_physician_review_required,

@@ -10,7 +10,10 @@ const uuid = z.string().uuid();
 type DatabaseError = { message?: string; details?: string; hint?: string; code?: string } | null;
 
 function visibleError(error: DatabaseError, fallback: string) {
-  return `${error?.code ?? "SEM_CODIGO"}: ${error?.message ?? fallback}`;
+  if (error?.code === "28000") return "Sua sessão expirou. Entre novamente para continuar.";
+  if (error?.code === "42501") return "Você não tem permissão para realizar esta ação nesta clínica.";
+  if (error?.code === "23514") return "O documento não atende aos requisitos para emissão. Revise os dados e tente novamente.";
+  return fallback;
 }
 
 function logDocumentError(section: string, error: DatabaseError) {
@@ -36,16 +39,16 @@ function logDocumentLogoError(logoPath: string | null, logoUrl: string | null, e
 async function context() {
   const supabase = await createClient();
   const failure = (error: string) => ({ supabase: null, userId: "", clinicId: "", role: "", error });
-  if (!supabase) return failure("SEM_CODIGO: Supabase não configurado.");
+  if (!supabase) return failure("Serviço temporariamente indisponível.");
   const { data: auth, error: authError } = await supabase.auth.getUser();
   if (authError) return failure(logDocumentError("auth", authError).error);
-  if (!auth.user) return failure("SEM_CODIGO: Sessão expirada.");
+  if (!auth.user) return failure("Sua sessão expirou. Entre novamente para continuar.");
   const { data: profile, error: profileError } = await supabase.from("profiles").select("active_clinic_id").eq("id", auth.user.id).maybeSingle();
   if (profileError) return failure(logDocumentError("profile", profileError).error);
-  if (!profile?.active_clinic_id) return failure("SEM_CODIGO: Selecione uma clínica ativa.");
+  if (!profile?.active_clinic_id) return failure("Selecione uma clínica ativa.");
   const { data: member, error: memberError } = await supabase.from("clinic_members").select("role,status").eq("clinic_id", profile.active_clinic_id).eq("user_id", auth.user.id).maybeSingle();
   if (memberError) return failure(logDocumentError("membership", memberError).error);
-  if (!member || member.status !== "active") return failure("42501: Sem vínculo ativo com a clínica.");
+  if (!member || member.status !== "active") return failure("Sem vínculo ativo com a clínica.");
   return { supabase, userId: auth.user.id, clinicId: profile.active_clinic_id as string, role: member.role as string, error: null };
 }
 
@@ -56,7 +59,7 @@ function refresh(appointmentId: string, id?: string) {
 }
 
 export async function listAppointmentDocuments(appointmentId: string) {
-  if (!uuid.safeParse(appointmentId).success) return { documents: [] as ClinicalDocument[], error: "VALIDATION_ERROR: Consulta inválida." };
+  if (!uuid.safeParse(appointmentId).success) return { documents: [] as ClinicalDocument[], error: "Consulta inválida." };
   const c = await context(); if (c.error || !c.supabase) return { documents: [] as ClinicalDocument[], error: c.error };
   const { data, error } = await c.supabase.from("clinical_documents").select("*").eq("clinic_id", c.clinicId).eq("appointment_id", appointmentId).is("deleted_at", null).order("created_at", { ascending: false });
   if (error) return { documents: [] as ClinicalDocument[], ...logDocumentError("history", error) };
@@ -64,13 +67,13 @@ export async function listAppointmentDocuments(appointmentId: string) {
 }
 
 export async function createClinicalDocument(appointmentId: string, type: ClinicalDocumentType) {
-  if (!uuid.safeParse(appointmentId).success || !clinicalDocumentTypes.includes(type)) return { error: "VALIDATION_ERROR: Dados inválidos." };
+  if (!uuid.safeParse(appointmentId).success || !clinicalDocumentTypes.includes(type)) return { error: "Dados inválidos." };
   const c = await context(); if (c.error || !c.supabase) return { error: c.error };
   const appointmentResult = await c.supabase.from("appointments").select("id,clinic_id,patient_id,professional_id").eq("id", appointmentId).eq("clinic_id", c.clinicId).maybeSingle();
   if (appointmentResult.error) return logDocumentError("appointment", appointmentResult.error);
   const appointment = appointmentResult.data;
-  if (!appointment) return { error: "PGRST116: Consulta não encontrada na clínica ativa." };
-  if (appointment.professional_id !== c.userId) return { error: "42501: Somente o profissional responsável pode criar documentos." };
+  if (!appointment) return { error: "Consulta não encontrada na clínica ativa." };
+  if (appointment.professional_id !== c.userId) return { error: "Somente o profissional responsável pode criar documentos." };
   const recordResult = await c.supabase.from("medical_records").select("id").eq("appointment_id", appointmentId).eq("clinic_id", c.clinicId).is("deleted_at", null).maybeSingle();
   if (recordResult.error) return logDocumentError("medical_record", recordResult.error);
   const title = ({ prescription: "Receita simples", special_prescription: "Receita de controle especial", medical_certificate: "Atestado médico", attendance_declaration: "Declaração de comparecimento", exam_request: "Solicitação de exames", referral: "Encaminhamento", patient_guidance: "Orientações ao paciente", medical_report: "Relatório médico", clinical_summary: "Sumário clínico", printable_evolution: "Evolução clínica" } as Record<ClinicalDocumentType, string>)[type];
@@ -179,15 +182,20 @@ export async function getClinicalDocument(id: string) {
 }
 
 export async function saveClinicalDocument(id: string, title: string, content: Record<string, string | boolean>, items: PrescriptionItem[], options?: { generatedByAi?: boolean; templateId?: string | null }) {
-  if (!uuid.safeParse(id).success) return { error: "VALIDATION_ERROR: Documento inválido." };
+  if (!uuid.safeParse(id).success) return { error: "Documento inválido." };
   const c = await context(); if (c.error || !c.supabase) return { error: c.error };
-  const documentResult = await c.supabase.from("clinical_documents").select("id,appointment_id,status,professional_id").eq("id", id).eq("clinic_id", c.clinicId).maybeSingle();
+  const documentResult = await c.supabase.from("clinical_documents").select("id,appointment_id,status,professional_id,generated_by_ai,template_id").eq("id", id).eq("clinic_id", c.clinicId).maybeSingle();
   if (documentResult.error) return logDocumentError("load_draft", documentResult.error);
   const doc = documentResult.data;
-  if (!doc) return { error: "PGRST116: Documento não encontrado." };
-  if (doc.status !== "draft") return { error: "42501: Documento emitido não pode ser alterado." };
-  if (doc.professional_id !== c.userId) return { error: "42501: Sem permissão para editar." };
-  const updated = await c.supabase.from("clinical_documents").update({ title: title.trim(), content, generated_by_ai: Boolean(options?.generatedByAi), reviewed_by_physician: true, reviewed_at: new Date().toISOString(), reviewed_by: c.userId, template_id: options?.templateId || null }).eq("id", id).eq("status", "draft").select("id").maybeSingle();
+  if (!doc) return { error: "Documento não encontrado." };
+  if (doc.status !== "draft") return { error: "Documento emitido não pode ser alterado." };
+  if (doc.professional_id !== c.userId) return { error: "Sem permissão para editar." };
+  const updated = await c.supabase.from("clinical_documents").update({
+    title: title.trim(),
+    content,
+    generated_by_ai: options?.generatedByAi ?? doc.generated_by_ai,
+    template_id: options?.templateId === undefined ? doc.template_id : options.templateId,
+  }).eq("id", id).eq("status", "draft").select("id").maybeSingle();
   if (updated.error) return logDocumentError("save_draft", updated.error);
   if (!updated.data) return logDocumentError("save_draft", { code: "PGRST116", message: "O rascunho não foi atualizado." });
   const removed = await c.supabase.from("prescription_items").delete().eq("clinic_id", c.clinicId).eq("document_id", id);
@@ -231,12 +239,12 @@ export async function listClinicalDocumentHistory(documentId: string) {
 }
 
 export async function issueClinicalDocument(id: string) {
-  if (!uuid.safeParse(id).success) return { error: "VALIDATION_ERROR: Documento inválido." };
+  if (!uuid.safeParse(id).success) return { error: "Documento inválido." };
   const c = await context(); if (c.error || !c.supabase) return { error: c.error };
   const before = await c.supabase.from("clinical_documents").select("appointment_id,status,professional_id").eq("id", id).eq("clinic_id", c.clinicId).maybeSingle();
   if (before.error) return logDocumentError("load_before_issue", before.error);
-  if (!before.data) return { error: "PGRST116: Documento não encontrado." };
-  if (before.data.professional_id !== c.userId) return { error: "42501: Somente o profissional responsável pode emitir o documento." };
+  if (!before.data) return { error: "Documento não encontrado." };
+  if (before.data.professional_id !== c.userId) return { error: "Somente o profissional responsável pode emitir o documento." };
   const issued = await c.supabase.rpc("issue_clinical_document", { target_document_id: id });
   if (issued.error) return logDocumentError("issue", issued.error);
   const confirmation = await c.supabase.from("clinical_documents").select("status,issued_at").eq("id", id).eq("clinic_id", c.clinicId).maybeSingle();
@@ -248,7 +256,7 @@ export async function issueClinicalDocument(id: string) {
 export async function cancelClinicalDocument(id: string, reason: string) {
   const c = await context(); if (c.error || !c.supabase) return { error: c.error };
   const doc = await c.supabase.from("clinical_documents").select("appointment_id").eq("id", id).eq("clinic_id", c.clinicId).maybeSingle();
-  if (doc.error) return logDocumentError("load_before_cancel", doc.error); if (!doc.data) return { error: "PGRST116: Documento não encontrado." };
+  if (doc.error) return logDocumentError("load_before_cancel", doc.error); if (!doc.data) return { error: "Documento não encontrado." };
   const cancelled = await c.supabase.rpc("cancel_clinical_document", { target_document_id: id, reason });
   if (cancelled.error) return logDocumentError("cancel", cancelled.error); refresh(doc.data.appointment_id, id); return { success: "Documento cancelado sem apagar o histórico." };
 }
@@ -260,9 +268,9 @@ export async function markDocumentPrinted(id: string) {
 }
 
 export async function savePrescriptionFavorite(documentId: string, name: string) {
-  if (!uuid.safeParse(documentId).success || !name.trim()) return { error: "VALIDATION_ERROR: Informe um nome para o modelo." };
+  if (!uuid.safeParse(documentId).success || !name.trim()) return { error: "Informe um nome para o modelo." };
   const c = await context(); if (c.error || !c.supabase) return { error: c.error };
-  const doc = await getClinicalDocument(documentId); if (!doc || !(["prescription", "special_prescription"] as string[]).includes(doc.document_type)) return { error: "PGRST116: Receita não encontrada." };
+  const doc = await getClinicalDocument(documentId); if (!doc || !(["prescription", "special_prescription"] as string[]).includes(doc.document_type)) return { error: "Receita não encontrada." };
   const result = await c.supabase.from("favorite_prescriptions").upsert({ clinic_id: c.clinicId, professional_id: c.userId, name: name.trim(), document_type: doc.document_type, content: doc.content, items: doc.items ?? [] }, { onConflict: "clinic_id,professional_id,name" });
   return result.error ? logDocumentError("favorite", result.error) : { success: "Modelo favorito salvo." };
 }
