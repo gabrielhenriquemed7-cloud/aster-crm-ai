@@ -1,6 +1,6 @@
-export const clinicalDocumentTypes = ["prescription","special_prescription","medical_certificate","attendance_declaration","exam_request","referral","patient_guidance"] as const;
+export const clinicalDocumentTypes = ["prescription","special_prescription","medical_certificate","attendance_declaration","exam_request","referral","patient_guidance","medical_report","clinical_summary","printable_evolution"] as const;
 export type ClinicalDocumentType = typeof clinicalDocumentTypes[number];
-export const clinicalDocumentLabels: Record<ClinicalDocumentType,string> = { prescription:"Receita simples", special_prescription:"Receita de controle especial", medical_certificate:"Atestado médico", attendance_declaration:"Declaração de comparecimento", exam_request:"Solicitação de exames", referral:"Encaminhamento", patient_guidance:"Orientações ao paciente" };
+export const clinicalDocumentLabels: Record<ClinicalDocumentType,string> = { prescription:"Receita simples", special_prescription:"Receita de controle especial", medical_certificate:"Atestado médico", attendance_declaration:"Declaração de comparecimento", exam_request:"Solicitação de exames", referral:"Encaminhamento", patient_guidance:"Orientações ao paciente", medical_report:"Relatório médico", clinical_summary:"Sumário clínico", printable_evolution:"Evolução para impressão" };
 export type ClinicalDocumentStatus = "draft"|"in_review"|"finalized"|"signed"|"archived"|"cancelled";
 export const clinicalDocumentStatusLabels: Record<ClinicalDocumentStatus,string> = {
   draft:"Rascunho",
@@ -40,6 +40,7 @@ export interface ClinicalDocument {
   rendered_html:string|null; pdf_storage_path:string|null; pdf_status:"pending"|"available"|"failed"|"not_applicable";
   content_hash:string|null; hash_algorithm:string|null; hash_generated_at:string|null;
   template_id:string|null; template_version:number|null; renderer_version:number|null;
+  generated_by_ai:boolean; reviewed_by_physician:boolean; reviewed_at:string|null; reviewed_by:string|null; signed_at:string|null; signature_provider:string|null;
   schema_version:number|null; document_version:number; immutable_at:string|null;
   supersedes_document_id:string|null; superseded_by_document_id:string|null;
   legacy_migrated_at:string|null; legacy_source:string|null; legacy_confidence:"high"|"medium"|"low"|null;
@@ -49,3 +50,4 @@ export interface ClinicalDocument {
   document_settings?:OfficialClinicalDocumentSnapshot["document_settings"]|null;
   items?:PrescriptionItem[];
 }
+export interface ClinicalDocumentTemplate { id:string; clinic_id:string|null; document_type:ClinicalDocumentType; name:string; title:string; content:Record<string,string|boolean>; version:number; favorite:boolean; sort_order:number; }

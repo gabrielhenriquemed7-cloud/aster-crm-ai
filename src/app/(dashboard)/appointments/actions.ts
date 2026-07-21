@@ -19,7 +19,7 @@ type DbError = {
 const idSchema = z.string().uuid("Consulta inválida.");
 
 function refresh(id?: string) {
-  revalidatePath("/appointments"); revalidatePath("/dashboard");
+  revalidatePath("/appointments"); revalidatePath("/dashboard"); revalidatePath("/recepcao");
   if (id) revalidatePath(`/appointments/${id}`);
 }
 
@@ -134,13 +134,14 @@ export async function updateAppointmentStatus(id: string, status: AppointmentSta
   refresh(id); return { success: status === "cancelled" ? "Consulta cancelada." : "Status atualizado com sucesso.", id };
 }
 
-export async function startClinicalEncounter(id: string): Promise<{ error?: string }> {
+export async function startClinicalEncounter(id: string, lockToken: string): Promise<{ error?: string }> {
   if (!idSchema.safeParse(id).success) return { error: "Consulta inválida." };
+  if (!idSchema.safeParse(lockToken).success) return { error: "Sessão de edição inválida." };
   const current = await context(); if (current.error) return { error: current.error };
-  const { error } = await current.supabase.rpc("start_clinical_encounter", { target_appointment_id: id });
+  const { error } = await current.supabase.rpc("open_or_resume_consultation", { target_appointment_id: id, lock_token: lockToken });
   if (error) return { error: errorMessage(error, "Não foi possível iniciar o atendimento.") };
   refresh(id); revalidatePath(`/consultas/${id}/prontuario`);
-  redirect(`/consultas/${id}/prontuario`);
+  redirect(`/consultas/${id}/prontuario?session=${lockToken}`);
 }
 
 export async function getTodayAppointmentMetrics() {

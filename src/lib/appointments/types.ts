@@ -30,6 +30,12 @@ export interface Appointment {
   cancelled_at: string | null;
   cancellation_reason: string | null;
   arrived_at: string | null;
+  check_in_at: string | null;
+  checked_in_by: string | null;
+  waiting_since: string | null;
+  called_at: string | null;
+  finished_at: string | null;
+  arrival_notes: string | null;
   started_at: string | null;
   completed_at: string | null;
   completed_by: string | null;

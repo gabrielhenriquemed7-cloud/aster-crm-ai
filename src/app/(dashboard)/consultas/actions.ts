@@ -17,8 +17,10 @@ import type { OfficialClinicalDocumentSnapshot } from "@/lib/clinical-documents/
 import { buildPrescriptionPresentation } from "@/lib/prescription-engine/presentation";
 import type { PrescriptionDocument } from "@/lib/prescription-engine/types";
 import { createClient } from "@/lib/supabase/server";
+import { onConsultationAutosaved } from "@/lib/consultations/events";
+import { onConsultationAddendumCreated, onConsultationFinalizationFailed, onConsultationFinalizationRequested, onConsultationFinalized } from "@/lib/consultations/events";
 
-type SaveResult = { error?: string; id?: string; success?: string };
+type SaveResult = { error?: string; id?: string; success?: string; version?: number };
 const idSchema = z.string().uuid();
 const prescriptionMedicationSchema = z.object({
   id: z.string().uuid(),
@@ -115,7 +117,7 @@ export async function getMedicalRecordPageData(appointmentId: string) {
   const { data: appointment, error: appointmentError } = await current.supabase
     .from("appointments")
     .select(
-      "id, clinic_id, patient_id, professional_id, title, appointment_date, start_time, appointment_type, status, patient:patients(id, full_name, social_name, birth_date, gender, cpf, phone, insurance, allergies, continuous_medications, medical_history)",
+      "id, clinic_id, patient_id, professional_id, title, appointment_date, start_time, appointment_type, status, consultation_started_at, patient:patients(id, full_name, social_name, birth_date, created_at, gender, cpf, phone, insurance, insurance_card, photo_url, allergies, continuous_medications, medical_history)",
     )
     .eq("id", appointmentId)
     .eq("clinic_id", current.clinicId)
@@ -270,12 +272,15 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     );
   const { data: patientDocuments } = await current.supabase
     .from("clinical_documents")
-    .select("id, title, document_type, status, issued_at, created_at")
+    .select("id, appointment_id, title, document_type, status, issued_at, created_at")
     .eq("clinic_id", current.clinicId)
     .eq("patient_id", appointment.patient_id)
     .in("status", ["finalized", "signed", "archived", "cancelled"])
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
+  const { data: addenda } = record?.id
+    ? await current.supabase.from("medical_record_addenda").select("id,content,reason,created_by,created_at").eq("medical_record_id", record.id).order("created_at", { ascending: false })
+    : { data: [] };
   const [
     { data: scoreResults },
     { data: professionalProfile },
@@ -319,6 +324,7 @@ export async function getMedicalRecordPageData(appointmentId: string) {
     record: (record as MedicalRecord | null) ?? null,
     history,
     patientDocuments: patientDocuments ?? [],
+    addenda: addenda ?? [],
     scoreResults: scoreResults ?? [],
     professionalProfile: professionalProfile ?? null,
     clinicIdentity: clinicIdentity
@@ -347,6 +353,7 @@ export async function getMedicalRecordPageData(appointmentId: string) {
 export async function saveMedicalRecord(
   appointmentId: string,
   values: MedicalRecordFormValues,
+  lockToken?: string,
 ): Promise<SaveResult> {
   if (!idSchema.safeParse(appointmentId).success)
     return { error: "Consulta inválida." };
@@ -360,7 +367,7 @@ export async function saveMedicalRecord(
 
   const { data: appointment } = await current.supabase
     .from("appointments")
-    .select("id, professional_id, status")
+    .select("id, patient_id, professional_id, status")
     .eq("id", appointmentId)
     .eq("clinic_id", current.clinicId)
     .maybeSingle();
@@ -387,21 +394,16 @@ export async function saveMedicalRecord(
         "Este prontuário foi finalizado e está disponível apenas para leitura.",
     };
 
+  if (!lockToken || !idSchema.safeParse(lockToken).success)
+    return { error: "A sessão de edição expirou. Reabra a consulta para continuar." };
   const payload = recordPayload(parsed.data);
-  const result = existing
-    ? await current.supabase
-        .from("medical_records")
-        .update(payload)
-        .eq("id", existing.id)
-        .select("id")
-        .single()
-    : await current.supabase
-        .from("medical_records")
-        .insert({ appointment_id: appointmentId, ...payload })
-        .select("id")
-        .single();
+  const result = await current.supabase.rpc("autosave_consultation_draft", {
+    target_appointment_id: appointmentId,
+    lock_token: lockToken,
+    draft: payload,
+  });
 
-  if (result.error || !result.data) {
+  if (result.error || result.data === null) {
     console.error("medical record save failed", {
       message: result.error?.message,
       details: result.error?.details,
@@ -414,7 +416,16 @@ export async function saveMedicalRecord(
   revalidatePath(`/consultas/${appointmentId}/prontuario`);
   revalidatePath(`/consultas/${appointmentId}`);
   revalidatePath(`/appointments/${appointmentId}`);
-  return { success: "Prontuário salvo com sucesso.", id: result.data.id };
+  await onConsultationAutosaved({ appointmentId, patientId: appointment.patient_id ?? "", actorId: current.userId, occurredAt: new Date().toISOString(), autosaveVersion: Number(result.data) });
+  return { success: "Prontuário salvo com sucesso.", id: existing?.id, version: Number(result.data) };
+}
+
+export async function renewConsultationLock(appointmentId: string, lockToken: string) {
+  if (!idSchema.safeParse(appointmentId).success || !idSchema.safeParse(lockToken).success) return { error: "Sessão inválida." };
+  const current = await context(); if (current.error) return { error: current.error };
+  const { data, error } = await current.supabase.rpc("renew_consultation_lock", { target_appointment_id: appointmentId, lock_token: lockToken });
+  if (error) return { error: error.message || "Não foi possível renovar a sessão de edição." };
+  return { lockUntil: data as string };
 }
 
 export async function savePrescriptionDraft(
@@ -607,21 +618,26 @@ export async function issuePrescriptionFromMedicalRecord(
 
 export async function finalizeClinicalEncounter(
   appointmentId: string,
+  lockToken: string,
+  expectedAutosaveVersion: number,
+  acknowledgeAlerts = false,
 ): Promise<SaveResult> {
   if (!idSchema.safeParse(appointmentId).success)
     return { error: "Consulta inválida." };
   const current = await context();
   if (current.error) return { error: current.error };
-  const { data, error } = await current.supabase.rpc(
-    "finalize_clinical_encounter",
-    { target_appointment_id: appointmentId },
-  );
+  await onConsultationFinalizationRequested({ appointmentId, patientId: "", actorId: current.userId, occurredAt: new Date().toISOString() });
+  const { data, error } = await current.supabase.rpc("finalize_clinical_encounter_safe", { target_appointment_id: appointmentId, lock_token: lockToken, expected_autosave_version: expectedAutosaveVersion, acknowledge_alerts: acknowledgeAlerts });
   if (error) {
+    await current.supabase.rpc("record_consultation_finalization_failure", { target_appointment_id: appointmentId, failure_code: error.code || "finalization_failed" });
     const known =
       error.message.includes("Preencha motivo") ||
       error.message.includes("Salve o prontuário") ||
       error.message.includes("Somente o profissional") ||
-      error.message.includes("precisa estar em atendimento");
+      error.message.includes("precisa estar em atendimento") ||
+      error.message.includes("outra aba") ||
+      error.message.includes("alterações mais recentes") ||
+      error.message.includes("rascunho");
     if (!known)
       console.error("medical record finalize failed", {
         message: error.message,
@@ -629,6 +645,7 @@ export async function finalizeClinicalEncounter(
         hint: error.hint,
         code: error.code,
       });
+    await onConsultationFinalizationFailed({ appointmentId, patientId: "", actorId: current.userId, occurredAt: new Date().toISOString() });
     return {
       error: known
         ? error.message
@@ -639,9 +656,50 @@ export async function finalizeClinicalEncounter(
   revalidatePath(`/appointments/${appointmentId}`);
   revalidatePath("/appointments");
   revalidatePath("/dashboard");
+  revalidatePath("/recepcao");
+  await onConsultationFinalized({ appointmentId, patientId: "", actorId: current.userId, occurredAt: new Date().toISOString() });
   return {
     success:
       "Consulta finalizada. O prontuário agora está somente para leitura.",
     id: data as string,
   };
+}
+
+export type FinalizationIssue = { severity: "blocking" | "warning" | "info"; code: string; message: string };
+export async function validateConsultationFinalization(appointmentId: string) {
+  if (!idSchema.safeParse(appointmentId).success) return { issues: [{ severity: "blocking", code: "invalid", message: "Consulta inválida." }] as FinalizationIssue[], summary: null };
+  const current = await context(); if (current.error) return { issues: [{ severity: "blocking", code: "permission", message: current.error }] as FinalizationIssue[], summary: null };
+  const [{ data: appointment }, { data: record }, { data: documents }] = await Promise.all([
+    current.supabase.from("appointments").select("id,patient_id,professional_id,appointment_date,start_time,status,consultation_started_at").eq("id", appointmentId).eq("clinic_id", current.clinicId).maybeSingle(),
+    current.supabase.from("medical_records").select("id,status,chief_complaint,hpi,physical_exam,assessment,cid10,plan,prescription,prescription_draft,exam_requests,return_guidance,last_saved_at,autosave_version").eq("appointment_id", appointmentId).eq("clinic_id", current.clinicId).is("deleted_at", null).maybeSingle(),
+    current.supabase.from("clinical_documents").select("id,title,document_type,status").eq("appointment_id", appointmentId).eq("clinic_id", current.clinicId).is("deleted_at", null),
+  ]);
+  const issues: FinalizationIssue[] = [];
+  if (!appointment?.patient_id) issues.push({ severity: "blocking", code: "patient", message: "Paciente ausente ou inválido." });
+  if (!appointment?.professional_id || appointment.professional_id !== current.userId) issues.push({ severity: "blocking", code: "professional", message: "Somente o profissional responsável pode finalizar." });
+  if (!appointment?.appointment_date || !appointment?.start_time) issues.push({ severity: "blocking", code: "schedule", message: "Data ou horário da consulta não identificado." });
+  if (!record) issues.push({ severity: "blocking", code: "record", message: "O prontuário ainda não foi salvo." });
+  if (record && !record.chief_complaint?.trim()) issues.push({ severity: "blocking", code: "chief_complaint", message: "Informe o motivo da consulta." });
+  if (record && !record.assessment?.trim()) issues.push({ severity: "blocking", code: "assessment", message: "Revise a avaliação ou impressão diagnóstica." });
+  if (record && !record.plan?.trim()) issues.push({ severity: "blocking", code: "plan", message: "Revise o plano ou conduta." });
+  if (record && !record.hpi?.trim()) issues.push({ severity: "warning", code: "hpi", message: "A anamnese detalhada não foi preenchida." });
+  if (record && !record.physical_exam?.trim()) issues.push({ severity: "warning", code: "physical_exam", message: "Nenhum exame físico foi registrado; confirme se não se aplica." });
+  const draftDocuments = (documents ?? []).filter((item) => item.status === "draft" || item.status === "in_review");
+  if (draftDocuments.length) issues.push({ severity: "warning", code: "draft_documents", message: `Existem ${draftDocuments.length} documento(s) em rascunho.` });
+  const prescriptionDraft = record?.prescription_draft as { medications?: unknown[] } | null;
+  if (prescriptionDraft?.medications?.length) issues.push({ severity: "warning", code: "prescription_draft", message: "Existe uma prescrição estruturada em rascunho." });
+  if (record && !record.return_guidance?.trim()) issues.push({ severity: "info", code: "return", message: "Nenhum retorno foi definido." });
+  if (!(documents ?? []).length) issues.push({ severity: "info", code: "documents", message: "Nenhum documento foi produzido." });
+  if (record && !record.cid10?.trim()) issues.push({ severity: "info", code: "diagnosis", message: "Nenhum CID foi registrado." });
+  return { issues, summary: appointment && record ? { appointment, record, documents: documents ?? [], draftDocuments, autosaveVersion: record.autosave_version } : null };
+}
+
+export async function createClinicalAddendum(recordId: string, content: string, reason: string) {
+  if (!idSchema.safeParse(recordId).success || !content.trim() || !reason.trim()) return { error: "Informe conteúdo e justificativa do adendo." };
+  const current = await context(); if (current.error) return { error: current.error };
+  const { data, error } = await current.supabase.rpc("create_medical_record_addendum", { target_record_id: recordId, addendum_content: content.trim(), addendum_reason: reason.trim() });
+  if (error) return { error: error.message || "Não foi possível registrar o adendo." };
+  const { data: record } = await current.supabase.from("medical_records").select("appointment_id,patient_id").eq("id", recordId).maybeSingle();
+  if (record) { revalidatePath(`/consultas/${record.appointment_id}/prontuario`); await onConsultationAddendumCreated({ appointmentId: record.appointment_id, patientId: record.patient_id, actorId: current.userId, occurredAt: new Date().toISOString() }); }
+  return { success: "Adendo registrado sem alterar o conteúdo original.", id: data as string };
 }

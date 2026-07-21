@@ -61,7 +61,7 @@ export function AppointmentActions({
   }
   async function start() {
     setLoading("start");
-    const result = await startClinicalEncounter(id);
+    const result = await startClinicalEncounter(id, crypto.randomUUID());
     setLoading(null);
     if (result?.error) toast.error(result.error);
   }
@@ -156,7 +156,7 @@ export function AppointmentActions({
           ) : (
             <CirclePlay />
           )}{" "}
-          Iniciar atendimento
+          Iniciar consulta
         </Button>
       )}
       {status === "in_progress" && (

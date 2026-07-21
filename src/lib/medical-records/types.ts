@@ -26,6 +26,8 @@ export interface MedicalRecord {
   finalized_at: string | null;
   finalized_by: string | null;
   last_saved_at: string | null;
+  autosave_version: number;
+  draft_state: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -40,15 +42,19 @@ export interface MedicalRecordAppointment {
   appointment_date: string;
   start_time: string;
   status: string;
+  consultation_started_at: string | null;
   patient: {
     id: string;
     full_name: string;
     social_name: string | null;
     birth_date: string | null;
+    created_at: string;
     gender: string | null;
     cpf: string | null;
     phone: string | null;
     insurance: string | null;
+    insurance_card: string | null;
+    photo_url: string | null;
     allergies: string | null;
     continuous_medications: string | null;
     medical_history: string | null;

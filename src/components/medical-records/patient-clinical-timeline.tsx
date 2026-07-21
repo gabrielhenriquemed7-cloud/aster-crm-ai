@@ -51,10 +51,12 @@ export function PatientClinicalTimeline({
   appointment,
   history,
   documents,
+  addenda = [],
 }: {
   appointment: MedicalRecordAppointment;
   history: MedicalRecordHistoryItem[];
   documents: PatientTimelineDocument[];
+  addenda?: Array<{ id:string; content:string; reason:string; created_at:string }>;
 }) {
   const storageKey = `aster:patient-timeline:${appointment.id}:expanded`;
   const [expanded, setExpanded] = useState(() => {
@@ -67,8 +69,8 @@ export function PatientClinicalTimeline({
   const [visibleCount, setVisibleCount] = useState(10);
 
   const events = useMemo(
-    () => buildPatientTimelineEvents(history, documents),
-    [documents, history],
+    () => buildPatientTimelineEvents(history, documents, addenda),
+    [addenda, documents, history],
   );
   const context = useMemo(
     () => buildPatientTimelineContext(appointment, history, events),

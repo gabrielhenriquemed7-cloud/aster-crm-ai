@@ -1,115 +1,44 @@
 "use client";
-import { FilePlus2, Files, Loader2 } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+
+import { Download, FilePlus2, Files, History, Loader2, Save, Search, Send, Sparkles, Star } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { createClinicalDocument } from "@/app/(dashboard)/documentos/actions";
+
+import { generateClinicalAiSuggestion } from "@/app/(dashboard)/consultas/clinical-ai-actions";
+import { createClinicalDocument, getClinicalDocument, issueClinicalDocument, listAppointmentDocuments, listClinicalDocumentHistory, listClinicalDocumentTemplates, saveClinicalDocument, toggleClinicalDocumentTemplateFavorite } from "@/app/(dashboard)/documentos/actions";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ClinicalDocumentationAssistant } from "@/components/clinical-documents/clinical-documentation-assistant";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  clinicalDocumentLabels,
-  type ClinicalDocumentType,
-} from "@/lib/clinical-documents/types";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { clinicalDocumentLabels, clinicalDocumentStatusLabels, clinicalDocumentTypes, type ClinicalDocument, type ClinicalDocumentTemplate, type ClinicalDocumentType, type PrescriptionItem } from "@/lib/clinical-documents/types";
 import type { MedicalRecordFormValues } from "@/lib/medical-records/schema";
-const types: ClinicalDocumentType[] = [
-  "prescription",
-  "exam_request",
-  "medical_certificate",
-  "attendance_declaration",
-  "referral",
-  "patient_guidance",
-];
-export function RecordDocuments({
-  appointmentId,
-  canCreate,
-  documents,
-  getFormValues,
-}: {
-  appointmentId: string;
-  canCreate: boolean;
-  documents: Array<{
-    id: string;
-    title: string;
-    status: string;
-    issued_at: string | null;
-    created_at: string;
-  }>;
-  getFormValues: () => MedicalRecordFormValues;
-}) {
-  const router = useRouter();
-  const [loading, setLoading] = useState<ClinicalDocumentType | null>(null);
-  async function create(type: ClinicalDocumentType) {
-    setLoading(type);
-    const result = await createClinicalDocument(appointmentId, type);
-    setLoading(null);
-    if ("error" in result) return toast.error(result.error);
-    router.push(`/documentos/${result.id}`);
-  }
-  return (
-    <Card className="shadow-none">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="flex items-center gap-2">
-          <Files className="text-primary" />
-          Central de Documentos
-        </CardTitle>
-        <Button
-          size="sm"
-          variant="outline"
-          render={<Link href={`/consultas/${appointmentId}/documentos`} />}
-        >
-          Ver todos
-        </Button>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <ClinicalDocumentationAssistant
-          appointmentId={appointmentId}
-          canCreate={canCreate}
-          getFormValues={getFormValues}
-        />
-        {documents.length ? (
-          <div className="space-y-2">
-            {documents.map((document) => (
-              <Link
-                key={document.id}
-                href={`/documentos/${document.id}`}
-                className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm hover:bg-muted/30"
-              >
-                <span>{document.title}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {document.issued_at
-                    ? new Date(document.issued_at).toLocaleDateString("pt-BR")
-                    : new Date(document.created_at).toLocaleDateString("pt-BR")}
-                </span>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Nenhum documento gerado.
-          </p>
-        )}
-        <div className="flex flex-wrap gap-2">
-          {types.map((type) => (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              key={type}
-              disabled={!canCreate || Boolean(loading)}
-              onClick={() => create(type)}
-            >
-              {loading === type ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <FilePlus2 />
-              )}
-              {clinicalDocumentLabels[type]}
-            </Button>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
+
+const supported = clinicalDocumentTypes.filter((type) => type !== "patient_guidance");
+const emptyMedication: PrescriptionItem = { medication_name: "", concentration: "", pharmaceutical_form: "", route: "", dosage: "", frequency: "", duration: "", quantity: "", instructions: "", controlled: false, sort_order: 0 };
+
+export function RecordDocuments({ appointmentId, canCreate, documents: initialDocuments, getFormValues }: { appointmentId: string; canCreate: boolean; documents: Array<{ id:string; title:string; status:string; issued_at:string|null; created_at:string }>; getFormValues: () => MedicalRecordFormValues }) {
+  const [documents, setDocuments] = useState(initialDocuments); const [active, setActive] = useState<ClinicalDocument | null>(null); const [templates, setTemplates] = useState<ClinicalDocumentTemplate[]>([]);
+  const [title, setTitle] = useState(""); const [body, setBody] = useState(""); const [observations, setObservations] = useState(""); const [medication, setMedication] = useState<PrescriptionItem>(emptyMedication);
+  const [loading, setLoading] = useState(""); const [templateSearch, setTemplateSearch] = useState(""); const [history, setHistory] = useState<Array<{id:string;event_type:string;created_at:string;actor_name:string}>>([]); const [aiGenerated, setAiGenerated] = useState(false);
+  const isPrescription = active?.document_type === "prescription" || active?.document_type === "special_prescription";
+
+  useEffect(() => { void Promise.all([listAppointmentDocuments(appointmentId), listClinicalDocumentTemplates()]).then(([docs, templateResult]) => { if (!docs.error) setDocuments(docs.documents); if (!templateResult.error) setTemplates(templateResult.templates); }); }, [appointmentId]);
+  async function select(id: string) { setLoading("load"); const document = await getClinicalDocument(id); setLoading(""); if (!document) return toast.error("Não foi possível carregar o documento."); setActive(document); setTitle(document.title); setBody(String(document.content.body ?? document.content.text ?? "")); setObservations(String(document.content.observations ?? "")); setMedication(document.items?.[0] ?? { ...emptyMedication, controlled: document.document_type === "special_prescription" }); setAiGenerated(document.generated_by_ai); setHistory(await listClinicalDocumentHistory(id)); }
+  async function create(type: ClinicalDocumentType, template?: ClinicalDocumentTemplate) { setLoading("create"); const result = await createClinicalDocument(appointmentId, type); if ("error" in result) { setLoading(""); return toast.error(result.error); } const document = await getClinicalDocument(result.id); setLoading(""); if (!document) return; setActive(document); setTitle(template?.title ?? document.title); setBody(String(template?.content.body ?? "")); setObservations(""); setMedication({ ...emptyMedication, controlled: type === "special_prescription" }); setAiGenerated(false); setHistory([]); }
+  async function save(showToast = true) { if (!active) return false; setLoading("save"); const items = isPrescription && medication.medication_name.trim() ? [medication] : []; const result = await saveClinicalDocument(active.id, title, { body, observations }, items, { generatedByAi: aiGenerated, templateId: active.template_id }); setLoading(""); if ("error" in result && result.error) { toast.error(result.error); return false; } if (showToast) toast.success("Rascunho salvo e revisado."); const refreshed = await listAppointmentDocuments(appointmentId); if (!refreshed.error) setDocuments(refreshed.documents); return true; }
+  async function issue() { if (!active || !(await save(false))) return; setLoading("issue"); const result = await issueClinicalDocument(active.id); setLoading(""); if ("error" in result) return toast.error(result.error); toast.success("Documento emitido após revisão médica."); await select(active.id); }
+  async function generateWithAi() { if (!active) return; const values = getFormValues(); const source = Object.entries(values).filter(([, value]) => value?.trim()).map(([key, value]) => `${key}: ${value}`).join("\n"); if (!source) return toast.error("Registre contexto clínico antes de gerar o documento."); setLoading("ai"); const requestType = active.document_type === "exam_request" ? "exams" : active.document_type === "clinical_summary" ? "structured_anamnesis" : "complete_analysis"; const result = await generateClinicalAiSuggestion({ appointmentId, text: source, requestType }); setLoading(""); if (result.error || !result.suggestion) return toast.error(result.error || "A IA não retornou conteúdo."); const suggestion = result.suggestion; const generated = active.document_type === "exam_request" ? suggestion.suggestedExams : [suggestion.hpi, suggestion.clinicalAssessment, suggestion.plan, suggestion.guidance].filter(Boolean).join("\n\n"); setBody(generated); setAiGenerated(true); toast.success("Rascunho gerado. Revise antes de salvar ou emitir."); }
+  const filteredTemplates = useMemo(() => templates.filter((item) => `${item.name} ${clinicalDocumentLabels[item.document_type]}`.toLocaleLowerCase().includes(templateSearch.toLocaleLowerCase())), [templateSearch, templates]);
+  const age = active?.patient?.birth_date ? Math.max(0, new Date().getFullYear() - new Date(active.patient.birth_date).getFullYear()) : null;
+
+  return <Card className="shadow-none"><CardHeader><CardTitle className="flex items-center gap-2"><Files className="text-primary" /> Documentos</CardTitle></CardHeader><CardContent className="space-y-3"><div className="grid min-w-0 gap-3 xl:grid-cols-[220px_minmax(0,1fr)]">
+    <aside className="space-y-2 rounded-lg border p-2"><Dialog><DialogTrigger asChild><Button className="w-full" size="sm" disabled={!canCreate}><FilePlus2 /> Novo documento</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Novo documento</DialogTitle><DialogDescription>Escolha o tipo ou aplique um modelo. O rascunho permanecerá na consulta.</DialogDescription></DialogHeader><div className="grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2">{supported.map((type) => <DialogClose asChild key={type}><Button variant="outline" className="justify-start" onClick={() => create(type)}>{clinicalDocumentLabels[type]}</Button></DialogClose>)}</div></DialogContent></Dialog>
+      <div className="max-h-64 space-y-1 overflow-y-auto">{documents.map((document) => <button key={document.id} type="button" onClick={() => select(document.id)} className={`w-full rounded-md border p-2 text-left text-xs hover:bg-muted/30 ${active?.id === document.id ? "border-primary bg-primary/5" : ""}`}><span className="block truncate font-medium">{document.title}</span><span className="mt-1 block text-[10px] text-muted-foreground">{document.status} · {new Date(document.issued_at || document.created_at).toLocaleDateString("pt-BR")}</span></button>)}{!documents.length && <p className="p-3 text-xs text-muted-foreground">Nenhum documento nesta consulta.</p>}</div>
+      <div className="border-t pt-2"><label className="relative block"><Search className="absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground" /><Input className="h-8 pl-7 text-xs" value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} placeholder="Pesquisar modelos" /></label><div className="mt-2 max-h-48 space-y-1 overflow-y-auto">{filteredTemplates.map((template) => <div key={template.id} className="flex items-center gap-1"><button type="button" className="min-w-0 flex-1 rounded p-1.5 text-left text-[11px] hover:bg-muted" onClick={() => create(template.document_type, template)}><span className="block truncate font-medium">{template.name}</span><span className="text-[9px] text-muted-foreground">{clinicalDocumentLabels[template.document_type]}</span></button><Button size="icon-xs" variant="ghost" aria-label={template.favorite ? "Remover favorito" : "Favoritar modelo"} onClick={async () => { const result = await toggleClinicalDocumentTemplateFavorite(template.id, !template.favorite, templates.filter((item) => item.favorite).length); if ("error" in result) return toast.error(result.error); setTemplates((current) => current.map((item) => item.id === template.id ? { ...item, favorite: !item.favorite } : item)); }}><Star className={template.favorite ? "fill-current text-amber-500" : ""} /></Button></div>)}</div></div>
+    </aside>
+    <main className="min-w-0">{loading === "load" ? <div className="grid min-h-96 place-items-center"><Loader2 className="animate-spin text-primary" /></div> : active ? <div className="grid min-w-0 gap-3 2xl:grid-cols-2"><section className="space-y-3 rounded-lg border p-3"><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{clinicalDocumentLabels[active.document_type]}</Badge><Badge variant="secondary">{clinicalDocumentStatusLabels[active.status]}</Badge><span className="ml-auto text-[10px] text-muted-foreground">v{active.document_version || 1}</span></div><label className="block text-xs font-medium">Título<Input className="mt-1" value={title} disabled={active.status !== "draft"} onChange={(event) => setTitle(event.target.value)} /></label>{isPrescription && <div className="grid gap-2 sm:grid-cols-2"><label className="text-xs font-medium sm:col-span-2">Medicamento<Input className="mt-1" value={medication.medication_name} onChange={(event) => setMedication((current) => ({ ...current, medication_name: event.target.value }))} /></label><label className="text-xs font-medium">Dose<Input className="mt-1" value={medication.dosage} onChange={(event) => setMedication((current) => ({ ...current, dosage: event.target.value }))} /></label><label className="text-xs font-medium">Frequência<Input className="mt-1" value={medication.frequency} onChange={(event) => setMedication((current) => ({ ...current, frequency: event.target.value }))} /></label></div>}<label className="block text-xs font-medium">Conteúdo<textarea className="mt-1 min-h-44 w-full rounded-md border bg-background p-3 text-sm" value={body} disabled={active.status !== "draft"} onChange={(event) => setBody(event.target.value)} /></label><label className="block text-xs font-medium">Observações<textarea className="mt-1 min-h-16 w-full rounded-md border bg-background p-2 text-sm" value={observations} disabled={active.status !== "draft"} onChange={(event) => setObservations(event.target.value)} /></label><div className="grid gap-1 text-[10px] text-muted-foreground sm:grid-cols-2"><span>Assinatura: {active.signed_at ? "Registrada" : "Pendente"}</span><span>CRM: {active.professional?.council_number || "Não informado"}</span><span>Data: {new Date().toLocaleDateString("pt-BR")}</span><span>Autor: {active.professional?.professional_name || active.professional?.full_name || "Profissional"}</span></div>{active.status === "draft" && <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={generateWithAi} disabled={Boolean(loading)}>{loading === "ai" ? <Loader2 className="animate-spin" /> : <Sparkles />} Gerar com IA</Button><Button size="sm" variant="outline" onClick={() => save()} disabled={Boolean(loading)}>{loading === "save" ? <Loader2 className="animate-spin" /> : <Save />} Salvar</Button><Button size="sm" onClick={issue} disabled={Boolean(loading)}>{loading === "issue" ? <Loader2 className="animate-spin" /> : <Send />} Revisar e emitir</Button></div>}</section>
+      <section className="rounded-lg border bg-white p-5 text-slate-950 shadow-sm"><div className="border-b pb-3 text-center"><p className="font-semibold">{active.clinic?.name || "Instituição"}</p><p className="text-xs">{active.clinic?.address || active.clinic?.email || "Cabeçalho institucional"}</p></div><div className="py-4 text-xs"><p><strong>Paciente:</strong> {active.patient?.social_name || active.patient?.full_name}</p><p><strong>Sexo:</strong> dado da consulta · <strong>Idade:</strong> {age === null ? "não informada" : `${age} anos`} · <strong>CPF:</strong> {active.patient?.cpf || "não informado"}</p><h3 className="my-5 text-center text-base font-bold uppercase">{title}</h3><div className="min-h-44 whitespace-pre-wrap text-sm leading-6">{isPrescription && medication.medication_name ? `${medication.medication_name}\n${medication.dosage} · ${medication.frequency}\n\n` : ""}{body || "O conteúdo aparecerá aqui em tempo real."}</div>{observations && <p className="mt-4 border-t pt-2"><strong>Observações:</strong> {observations}</p>}</div><div className="mt-8 border-t pt-3 text-center text-xs"><p>{active.professional?.professional_name || active.professional?.full_name}</p><p>{active.professional?.council || "CRM"} {active.professional?.council_number || "—"} · assinatura digital preparada</p><p className="mt-3 text-[9px] text-slate-500">Documento nº {String(active.public_number).padStart(8,"0")} · QR Code de validação: preparado</p></div>{active.status !== "draft" && <Button className="mt-4 w-full" size="sm" render={<a href={`/api/clinical-documents/${active.id}/pdf`} download />}><Download /> Baixar PDF</Button>}</section>
+      <details className="2xl:col-span-2 rounded-lg border"><summary className="flex cursor-pointer items-center gap-2 p-3 text-xs font-semibold"><History className="size-4" /> Histórico e versões ({history.length})</summary><div className="border-t p-3">{history.map((event) => <p key={event.id} className="py-1 text-[11px] text-muted-foreground">{new Date(event.created_at).toLocaleString("pt-BR")} · {event.actor_name} · {event.event_type}</p>)}{!history.length && <p className="text-xs text-muted-foreground">O histórico será registrado ao salvar, emitir, imprimir ou assinar.</p>}</div></details></div> : <div className="grid min-h-96 place-items-center rounded-lg border border-dashed text-center"><div><Files className="mx-auto size-8 text-muted-foreground" /><p className="mt-2 text-sm font-medium">Selecione ou crie um documento</p><p className="text-xs text-muted-foreground">Editor e preview permanecerão dentro da consulta.</p></div></div>}</main>
+  </div></CardContent></Card>;
 }

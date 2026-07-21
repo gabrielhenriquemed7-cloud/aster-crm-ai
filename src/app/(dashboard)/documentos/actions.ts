@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { clinicalDocumentTypes, type ClinicalDocument, type ClinicalDocumentType, type OfficialClinicalDocumentSnapshot, type PrescriptionItem } from "@/lib/clinical-documents/types";
+import { clinicalDocumentTypes, type ClinicalDocument, type ClinicalDocumentTemplate, type ClinicalDocumentType, type OfficialClinicalDocumentSnapshot, type PrescriptionItem } from "@/lib/clinical-documents/types";
 import { createClient } from "@/lib/supabase/server";
 
 const uuid = z.string().uuid();
@@ -73,7 +73,7 @@ export async function createClinicalDocument(appointmentId: string, type: Clinic
   if (appointment.professional_id !== c.userId) return { error: "42501: Somente o profissional responsável pode criar documentos." };
   const recordResult = await c.supabase.from("medical_records").select("id").eq("appointment_id", appointmentId).eq("clinic_id", c.clinicId).is("deleted_at", null).maybeSingle();
   if (recordResult.error) return logDocumentError("medical_record", recordResult.error);
-  const title = ({ prescription: "Receita simples", special_prescription: "Receita de controle especial", medical_certificate: "Atestado médico", attendance_declaration: "Declaração de comparecimento", exam_request: "Solicitação de exames", referral: "Encaminhamento", patient_guidance: "Orientações ao paciente" } as Record<ClinicalDocumentType, string>)[type];
+  const title = ({ prescription: "Receita simples", special_prescription: "Receita de controle especial", medical_certificate: "Atestado médico", attendance_declaration: "Declaração de comparecimento", exam_request: "Solicitação de exames", referral: "Encaminhamento", patient_guidance: "Orientações ao paciente", medical_report: "Relatório médico", clinical_summary: "Sumário clínico", printable_evolution: "Evolução clínica" } as Record<ClinicalDocumentType, string>)[type];
   const { data, error } = await c.supabase.from("clinical_documents").insert({
     clinic_id: c.clinicId, patient_id: appointment.patient_id, appointment_id: appointment.id,
     medical_record_id: recordResult.data?.id ?? null, professional_id: appointment.professional_id,
@@ -178,7 +178,7 @@ export async function getClinicalDocument(id: string) {
   } as ClinicalDocument;
 }
 
-export async function saveClinicalDocument(id: string, title: string, content: Record<string, string | boolean>, items: PrescriptionItem[]) {
+export async function saveClinicalDocument(id: string, title: string, content: Record<string, string | boolean>, items: PrescriptionItem[], options?: { generatedByAi?: boolean; templateId?: string | null }) {
   if (!uuid.safeParse(id).success) return { error: "VALIDATION_ERROR: Documento inválido." };
   const c = await context(); if (c.error || !c.supabase) return { error: c.error };
   const documentResult = await c.supabase.from("clinical_documents").select("id,appointment_id,status,professional_id").eq("id", id).eq("clinic_id", c.clinicId).maybeSingle();
@@ -187,7 +187,7 @@ export async function saveClinicalDocument(id: string, title: string, content: R
   if (!doc) return { error: "PGRST116: Documento não encontrado." };
   if (doc.status !== "draft") return { error: "42501: Documento emitido não pode ser alterado." };
   if (doc.professional_id !== c.userId) return { error: "42501: Sem permissão para editar." };
-  const updated = await c.supabase.from("clinical_documents").update({ title: title.trim(), content }).eq("id", id).eq("status", "draft").select("id").maybeSingle();
+  const updated = await c.supabase.from("clinical_documents").update({ title: title.trim(), content, generated_by_ai: Boolean(options?.generatedByAi), reviewed_by_physician: true, reviewed_at: new Date().toISOString(), reviewed_by: c.userId, template_id: options?.templateId || null }).eq("id", id).eq("status", "draft").select("id").maybeSingle();
   if (updated.error) return logDocumentError("save_draft", updated.error);
   if (!updated.data) return logDocumentError("save_draft", { code: "PGRST116", message: "O rascunho não foi atualizado." });
   const removed = await c.supabase.from("prescription_items").delete().eq("clinic_id", c.clinicId).eq("document_id", id);
@@ -197,6 +197,37 @@ export async function saveClinicalDocument(id: string, title: string, content: R
     if (inserted.error) return logDocumentError("save_items", inserted.error);
   }
   refresh(doc.appointment_id, id); return { success: "Rascunho salvo." };
+}
+
+export async function listClinicalDocumentTemplates() {
+  const c = await context(); if (c.error || !c.supabase) return { templates: [] as ClinicalDocumentTemplate[], error: c.error };
+  const [{ data, error }, { data: favorites }] = await Promise.all([
+    c.supabase.from("clinical_document_templates").select("id,clinic_id,document_type,name,title,content,version").eq("active", true).order("name"),
+    c.supabase.from("clinical_document_template_favorites").select("template_id,sort_order").eq("clinic_id", c.clinicId).eq("user_id", c.userId),
+  ]);
+  if (error) return { templates: [] as ClinicalDocumentTemplate[], ...logDocumentError("templates", error) };
+  const favoriteMap = new Map((favorites ?? []).map((item) => [item.template_id, item.sort_order]));
+  const templates = (data ?? []).map((item) => ({ ...item, content: item.content as Record<string,string|boolean>, favorite: favoriteMap.has(item.id), sort_order: favoriteMap.get(item.id) ?? 9999 })) as ClinicalDocumentTemplate[];
+  templates.sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name, "pt-BR"));
+  return { templates, error: null };
+}
+
+export async function toggleClinicalDocumentTemplateFavorite(templateId: string, favorite: boolean, sortOrder = 0) {
+  const c = await context(); if (c.error || !c.supabase) return { error: c.error };
+  const result = favorite
+    ? await c.supabase.from("clinical_document_template_favorites").upsert({ clinic_id: c.clinicId, user_id: c.userId, template_id: templateId, sort_order: sortOrder })
+    : await c.supabase.from("clinical_document_template_favorites").delete().eq("clinic_id", c.clinicId).eq("user_id", c.userId).eq("template_id", templateId);
+  return result.error ? logDocumentError("template_favorite", result.error) : { success: favorite ? "Modelo favoritado." : "Modelo removido dos favoritos." };
+}
+
+export async function listClinicalDocumentHistory(documentId: string) {
+  if (!uuid.safeParse(documentId).success) return [];
+  const c = await context(); if (c.error || !c.supabase) return [];
+  const { data } = await c.supabase.from("clinical_document_audit_events").select("id,event_type,actor_id,metadata,created_at").eq("clinic_id", c.clinicId).eq("document_id", documentId).order("created_at", { ascending: false });
+  const actorIds = [...new Set((data ?? []).flatMap((item) => item.actor_id ? [item.actor_id] : []))];
+  const { data: profiles } = actorIds.length ? await c.supabase.from("profiles").select("id,full_name").in("id", actorIds) : { data: [] };
+  const names = new Map((profiles ?? []).map((item) => [item.id, item.full_name]));
+  return (data ?? []).map((item) => ({ ...item, actor_name: item.actor_id ? names.get(item.actor_id) || "Profissional" : "Sistema" }));
 }
 
 export async function issueClinicalDocument(id: string) {

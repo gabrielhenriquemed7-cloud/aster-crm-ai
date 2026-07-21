@@ -110,6 +110,7 @@ export function ClinicalAIPanel({
   documents,
   patientAge,
   patientGender,
+  initialContext = "",
 }: {
   appointmentId: string;
   form: UseFormReturn<MedicalRecordFormValues>;
@@ -120,10 +121,11 @@ export function ClinicalAIPanel({
   documents: ReactNode;
   patientAge: number | null;
   patientGender: string | null;
+  initialContext?: string;
 }) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [sourceHighlighted, setSourceHighlighted] = useState(false);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialContext);
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<ClinicalAiSuggestion | null>(
     null,

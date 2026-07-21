@@ -5,13 +5,16 @@ import { getMedicalRecordPageData } from "@/app/(dashboard)/consultas/actions";
 import { MedicalRecordForm } from "@/components/medical-records/medical-record-form";
 import { WorkspaceLayout } from "@/components/clinical-workspace/workspace-layout";
 import { WorkspaceProvider } from "@/components/clinical-workspace/workspace-provider";
+import { ConsultationRecoveryGate } from "@/components/medical-records/consultation-recovery-gate";
 
 export default async function MedicalRecordPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ session?: string }>;
 }) {
-  const { id } = await params;
+  const [{ id }, query] = await Promise.all([params, searchParams]);
   const data = await getMedicalRecordPageData(id);
   if (!data) notFound();
   if (data.error || !data.appointment) {
@@ -25,6 +28,9 @@ export default async function MedicalRecordPage({
       </div>
     );
   }
+  const sessionToken = /^[0-9a-f-]{36}$/i.test(query.session ?? "") ? query.session! : null;
+  if (data.appointment.status === "in_progress" && data.canEdit && !sessionToken)
+    return <ConsultationRecoveryGate appointmentId={id} patientId={data.appointment.patient_id} professionalId={data.appointment.professional_id} />;
   return (
     <WorkspaceProvider
       identity={{
@@ -43,12 +49,14 @@ export default async function MedicalRecordPage({
           record={data.record}
           history={data.history}
           patientDocuments={data.patientDocuments}
+          addenda={data.addenda}
           canEdit={data.canEdit}
           aiEnabled={data.aiEnabled}
           canManageAi={data.canManageAi}
           initialLongitudinalSummary={data.longitudinalSummary}
           clinicIdentity={data.clinicIdentity}
           professionalProfile={data.professionalProfile}
+          sessionToken={sessionToken}
         />
       </WorkspaceLayout>
     </WorkspaceProvider>

@@ -15,6 +15,7 @@ import {
   LayoutDashboard,
   Mail,
   MessageCircle,
+  ClipboardCheck,
   Settings,
   Sparkles,
   UsersRound,
@@ -48,6 +49,7 @@ interface SidebarProps {
 const navigationItems: NavigationItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/appointments", label: "Agenda", icon: CalendarDays },
+  { href: "/recepcao", label: "Recepção", icon: ClipboardCheck },
   { href: "/patients", label: "Pacientes", icon: UsersRound },
   { href: "/appointments", label: "Consultas", icon: ClipboardList },
   { href: "/ia-clinica", label: "IA Clínica", icon: Bot },

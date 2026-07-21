@@ -7,6 +7,7 @@ import {
   CalendarClock,
   Calculator,
   Check,
+  Clock3,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -32,11 +33,15 @@ import { toast } from "sonner";
 import {
   finalizeClinicalEncounter,
   issuePrescriptionFromMedicalRecord,
+  renewConsultationLock,
   saveMedicalRecord,
   savePrescriptionDraft,
+  validateConsultationFinalization,
+  createClinicalAddendum,
+  type FinalizationIssue,
 } from "@/app/(dashboard)/consultas/actions";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -72,6 +77,7 @@ import { DiagnosisEngine } from "@/components/diagnoses/diagnosis-engine";
 import { ClinicalPlanEngine } from "@/components/clinical-plan/clinical-plan-engine";
 import { WorkspaceStepper } from "@/components/medical-records/consultation-stepper";
 import { ContextualClinicalPanel } from "@/components/medical-records/contextual-clinical-panel";
+import { PatientContextWorkspace } from "@/components/clinical-workspace/patient-context-workspace";
 import { useWorkspaceContext } from "@/components/clinical-workspace/workspace-provider";
 import { workspaceSections } from "@/lib/clinical-workspace/section-registry";
 import {
@@ -149,6 +155,13 @@ function ageFromBirthDate(birthDate: string | null) {
   )
     age -= 1;
   return age;
+}
+
+function consultationTime(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
 }
 
 function initialValues(
@@ -261,24 +274,28 @@ export function MedicalRecordForm({
   record,
   history,
   patientDocuments,
+  addenda,
   canEdit,
   aiEnabled,
   canManageAi,
   initialLongitudinalSummary,
   clinicIdentity,
   professionalProfile,
+  sessionToken,
 }: {
   appointment: MedicalRecordAppointment;
   record: MedicalRecord | null;
   history: MedicalRecordHistoryItem[];
   patientDocuments: Array<{
     id: string;
+    appointment_id?: string;
     title: string;
     document_type: string;
     status: string;
     issued_at: string | null;
     created_at: string;
   }>;
+  addenda: Array<{ id:string; content:string; reason:string; created_by:string; created_at:string }>;
   canEdit: boolean;
   aiEnabled: boolean;
   canManageAi: boolean;
@@ -297,6 +314,7 @@ export function MedicalRecordForm({
     council_state: string | null;
     specialty: string | null;
   } | null;
+  sessionToken: string | null;
 }) {
   const router = useRouter();
   const {
@@ -311,8 +329,14 @@ export function MedicalRecordForm({
   >(record?.status === "draft" ? "saved" : "idle");
   const [lastSavedAt, setLastSavedAt] = useState(record?.last_saved_at ?? null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [lockError, setLockError] = useState<string | null>(null);
   const [finalizeOpen, setFinalizeOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [validatingFinalization, setValidatingFinalization] = useState(false);
+  const [finalizationIssues, setFinalizationIssues] = useState<FinalizationIssue[]>([]);
+  const [alertsAcknowledged, setAlertsAcknowledged] = useState(false);
+  const [autosaveVersion, setAutosaveVersion] = useState(record?.autosave_version ?? 0);
   const [returnMode, setReturnMode] = useState<"none" | "days" | "date">(
     "none",
   );
@@ -406,7 +430,7 @@ export function MedicalRecordForm({
       }
       if (event.ctrlKey && event.key === "Enter" && canEdit) {
         event.preventDefault();
-        setFinalizeOpen(true);
+        void prepareFinalization();
       }
     };
     window.addEventListener("keydown", handleShortcut);
@@ -460,7 +484,7 @@ export function MedicalRecordForm({
     setSaving(true);
     setSaveState("saving");
     setSaveError(null);
-    const result = await saveMedicalRecord(appointment.id, values);
+    const result = await saveMedicalRecord(appointment.id, values, sessionToken ?? undefined);
     setSaving(false);
     if (result.error) {
       setSaveState("error");
@@ -472,9 +496,10 @@ export function MedicalRecordForm({
     aiReviewPending.current = false;
     setAiPendingFields([]);
     setLastSavedAt(new Date().toISOString());
+    if (result.version !== undefined) setAutosaveVersion(result.version);
     if (notify) toast.success(result.success);
     router.refresh();
-    return true;
+    return result.version ?? autosaveVersion;
   }
   async function submit(values: MedicalRecordFormValues) {
     await persist(values, true);
@@ -512,6 +537,46 @@ export function MedicalRecordForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEdit, appointment.id]);
 
+  useEffect(() => {
+    if (!canEdit || !sessionToken) return;
+    const startedAt = appointment.consultation_started_at
+      ? new Date(appointment.consultation_started_at).getTime()
+      : Date.now();
+    const tick = () =>
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [appointment.consultation_started_at, canEdit, sessionToken]);
+
+  useEffect(() => {
+    if (!canEdit || !sessionToken) return;
+    const maintain = async () => {
+      const result = await renewConsultationLock(appointment.id, sessionToken);
+      if (result.error) setLockError(result.error);
+    };
+    const heartbeat = window.setInterval(() => void maintain(), 30000);
+    const autosave = window.setInterval(() => {
+      if (form.formState.isDirty)
+        void form.handleSubmit((values) => persist(values))();
+    }, 30000);
+    return () => {
+      window.clearInterval(heartbeat);
+      window.clearInterval(autosave);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointment.id, canEdit, sessionToken]);
+
+  async function prepareFinalization() {
+    setValidatingFinalization(true);
+    const result = await validateConsultationFinalization(appointment.id);
+    setValidatingFinalization(false);
+    setFinalizationIssues(result.issues);
+    if (result.summary?.autosaveVersion !== undefined) setAutosaveVersion(result.summary.autosaveVersion);
+    setAlertsAcknowledged(false);
+    setFinalizeOpen(true);
+  }
+
   async function finalize() {
     const valid = await form.trigger(["chief_complaint", "assessment", "plan"]);
     const values = form.getValues();
@@ -522,13 +587,17 @@ export function MedicalRecordForm({
       !values.plan?.trim()
     )
       return toast.error("Preencha motivo da consulta, avaliação e conduta.");
+    if (returnMode !== "none") {
+      const guidance = returnMode === "days" ? `Retorno sugerido em ${Math.max(1, Number(returnDays) || 30)} dias.` : `Retorno sugerido para ${new Intl.DateTimeFormat("pt-BR").format(new Date(`${returnDate}T12:00:00`))}.`;
+      form.setValue("return_guidance", guidance, { shouldDirty: true });
+    }
     setFinalizing(true);
     const saved = await persist(values);
     if (!saved) {
       setFinalizing(false);
       return;
     }
-    const result = await finalizeClinicalEncounter(appointment.id);
+    const result = await finalizeClinicalEncounter(appointment.id, sessionToken ?? "", saved, alertsAcknowledged);
     setFinalizing(false);
     if (result.error) return toast.error(result.error);
     toast.success(result.success);
@@ -621,6 +690,7 @@ export function MedicalRecordForm({
       >
         <div className="flex min-w-0 items-center gap-2.5">
           <Avatar size="sm" className="size-7 ring-1 ring-primary/30">
+            <AvatarImage src={patient?.photo_url ?? undefined} alt={`Foto de ${patient?.full_name ?? "paciente"}`} />
             <AvatarFallback>
               {(patient?.social_name || patient?.full_name || "P")
                 .split(" ")
@@ -669,6 +739,7 @@ export function MedicalRecordForm({
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          {canEdit && <span className="inline-flex h-8 items-center gap-1.5 px-2 text-[11px] text-muted-foreground" title="Tempo de consulta"><Clock3 className="size-3.5" /> {consultationTime(elapsedSeconds)}</span>}
           <span
             className={`inline-flex h-8 items-center gap-1.5 px-2 text-[11px] ${
               saveState === "error"
@@ -777,19 +848,38 @@ export function MedicalRecordForm({
           </details>
           {canEdit && (
             <Dialog open={finalizeOpen} onOpenChange={setFinalizeOpen}>
-              <DialogTrigger asChild>
-                <Button type="button" size="sm">
-                  <Flag /> Finalizar Atendimento
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
+              <Button type="button" size="sm" onClick={prepareFinalization} disabled={validatingFinalization}>
+                {validatingFinalization ? <Loader2 className="animate-spin" /> : <Flag />} Finalizar Consulta
+              </Button>
+              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
                 <DialogHeader>
-                  <DialogTitle>Finalizar atendimento?</DialogTitle>
+                  <DialogTitle>Finalizar consulta</DialogTitle>
                   <DialogDescription>
-                    Esta ação torna o prontuário somente leitura. Confirme os
-                    dados clínicos antes de continuar.
+                    Revise o resumo e as pendências. A consulta ficará somente para leitura.
                   </DialogDescription>
                 </DialogHeader>
+                <div className="grid gap-3 rounded-lg border bg-muted/15 p-3 text-xs sm:grid-cols-2">
+                  <p><strong>Paciente:</strong> {patient?.social_name || patient?.full_name}</p>
+                  <p><strong>Profissional:</strong> {appointment.professional?.full_name}</p>
+                  <p><strong>Data:</strong> {new Intl.DateTimeFormat("pt-BR").format(new Date(`${appointment.appointment_date}T12:00:00`))}</p>
+                  <p><strong>Início:</strong> {appointment.consultation_started_at ? new Date(appointment.consultation_started_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : appointment.start_time.slice(0,5)}</p>
+                  <p><strong>Duração:</strong> {consultationTime(elapsedSeconds)}</p>
+                  <p><strong>Motivo:</strong> {chiefComplaintValue || "Não informado"}</p>
+                  <p><strong>Diagnósticos:</strong> {[assessmentValue, cidValue].filter(Boolean).join(" · ") || "Não registrados"}</p>
+                  <p><strong>Documentos:</strong> {patientDocuments.length}</p>
+                  <p><strong>Prescrição:</strong> {prescriptionValue?.trim() ? "Registrada" : "Não registrada"}</p>
+                  <p><strong>Exames:</strong> {examRequestsValue?.trim() || "Não solicitados"}</p>
+                </div>
+                <section><h3 className="text-sm font-semibold">Checklist de revisão</h3><div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <ReviewItem checked={Boolean(chiefComplaintValue?.trim() && hpiValue?.trim())} label="Registro clínico revisado" />
+                  <ReviewItem checked={Boolean(assessmentValue.trim())} label="Diagnósticos revisados" />
+                  <ReviewItem checked={Boolean(planValue.trim())} label="Conduta revisada" />
+                  <ReviewItem checked={!finalizationIssues.some((item) => item.code === "prescription_draft")} label="Prescrições revisadas" />
+                  <ReviewItem checked={!finalizationIssues.some((item) => item.code === "draft_documents")} label="Documentos revisados" />
+                  <ReviewItem checked={Boolean(returnGuidanceValue.trim()) || returnMode !== "none"} label="Retorno definido ou dispensado" />
+                  <ReviewItem checked={saveState === "saved"} label="Informações salvas" />
+                </div></section>
+                <section className="space-y-2"><h3 className="text-sm font-semibold">Pendências</h3>{finalizationIssues.map((issue) => <div key={issue.code} className={`rounded-md border p-2 text-xs ${issue.severity === "blocking" ? "border-destructive/30 bg-destructive/5 text-destructive" : issue.severity === "warning" ? "border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-200" : "text-muted-foreground"}`}><strong>{issue.severity === "blocking" ? "Bloqueante" : issue.severity === "warning" ? "Alerta" : "Informação"}:</strong> {issue.message}</div>)}{!finalizationIssues.length && <p className="text-xs text-emerald-700">Pronto para finalizar.</p>}</section>
                 <div className="space-y-3">
                   <label className="flex gap-2 text-sm">
                     <input
@@ -830,6 +920,7 @@ export function MedicalRecordForm({
                     />
                   </label>
                 </div>
+                {finalizationIssues.some((item) => item.severity === "warning") && <label className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs"><input type="checkbox" className="mt-0.5" checked={alertsAcknowledged} onChange={(event) => setAlertsAcknowledged(event.target.checked)} /><span>Revisei os alertas e desejo finalizar sem emitir ou alterar automaticamente documentos e prescrições em rascunho.</span></label>}
                 <DialogFooter>
                   <DialogClose asChild>
                     <Button type="button" variant="outline">
@@ -839,12 +930,12 @@ export function MedicalRecordForm({
                   <Button
                     type="button"
                     disabled={
-                      finalizing || (returnMode === "date" && !returnDate)
+                      finalizing || finalizationIssues.some((item) => item.severity === "blocking") || (finalizationIssues.some((item) => item.severity === "warning") && !alertsAcknowledged) || (returnMode === "date" && !returnDate)
                     }
                     onClick={finalize}
                   >
                     {finalizing && <Loader2 className="animate-spin" />}{" "}
-                    Confirmar finalização
+                    Finalizar consulta
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -852,6 +943,10 @@ export function MedicalRecordForm({
           )}
         </div>
       </header>
+
+      <PatientContextWorkspace appointment={appointment} history={history} documents={patientDocuments} />
+
+      {lockError && <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><AlertCircle className="size-4" /> {lockError} Feche esta aba e continue pela consulta ativa.</div>}
 
       <WorkspaceNavigation>
         <WorkspaceStepper
@@ -877,6 +972,8 @@ export function MedicalRecordForm({
             : "O prontuário só pode ser editado pelo profissional responsável durante o atendimento."}
         </div>
       )}
+      {!canEdit && record && (record.status === "finalized" || record.status === "amended") && <ClinicalAddendumPanel recordId={record.id} />}
+      {!canEdit && appointment.status === "completed" && <div className="flex flex-wrap gap-2 rounded-lg border bg-card p-3"><Button size="sm" variant="outline" render={<Link href="/recepcao" />}><ChevronLeft /> Voltar para a fila</Button><Button size="sm" variant="outline" onClick={() => setTimelineOpen(true)}><Activity /> Timeline do paciente</Button><Button size="sm" variant="outline" render={<Link href={`/consultas/${appointment.id}/prontuario/visualizar`} />}><FileText /> Visualizar consolidado</Button><Button size="sm" variant="outline" render={<a href={`/api/medical-records/${appointment.id}/pdf`} download />}><Printer /> Gerar PDF</Button><Button size="sm" render={<Link href={`/appointments/new?patient=${appointment.patient_id}&professional=${appointment.professional_id}&type=return`} />}><CalendarClock /> Agendar retorno</Button></div>}
       {saveError && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
           <AlertCircle className="size-4" />
@@ -1510,6 +1607,12 @@ export function MedicalRecordForm({
                   }
                   patientAge={age}
                   patientGender={patient?.gender ?? null}
+                  initialContext={[
+                    patient?.medical_history && `Histórico resumido: ${patient.medical_history}`,
+                    history[0]?.assessment && `Problemas e hipóteses anteriores: ${history[0].assessment}`,
+                    patient?.allergies && `Alergias: ${patient.allergies}`,
+                    patient?.continuous_medications && `Medicamentos em uso: ${patient.continuous_medications}`,
+                  ].filter(Boolean).join("\n\n")}
                 />
                 <div className="mt-auto hidden justify-end border-t pt-2 lg:flex">
                   <Button
@@ -1562,6 +1665,7 @@ export function MedicalRecordForm({
               appointment={appointment}
               history={history}
               documents={patientDocuments}
+              addenda={addenda}
             />
           </aside>
         </div>
@@ -1569,4 +1673,14 @@ export function MedicalRecordForm({
 
     </form>
   );
+}
+
+function ReviewItem({ checked, label }: { checked: boolean; label: string }) {
+  return <div className="flex items-center gap-2 rounded-md border p-2 text-xs"><span className={`grid size-4 place-items-center rounded-full ${checked ? "bg-emerald-600 text-white" : "bg-muted text-muted-foreground"}`}>{checked ? "✓" : "·"}</span>{label}</div>;
+}
+
+function ClinicalAddendumPanel({ recordId }: { recordId: string }) {
+  const router = useRouter(); const [open, setOpen] = useState(false); const [content, setContent] = useState(""); const [reason, setReason] = useState(""); const [saving, setSaving] = useState(false);
+  async function submit() { setSaving(true); const result = await createClinicalAddendum(recordId, content, reason); setSaving(false); if (result.error) return toast.error(result.error); toast.success(result.success); setOpen(false); setContent(""); setReason(""); router.refresh(); }
+  return <Dialog open={open} onOpenChange={setOpen}><div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card p-3"><div><p className="text-sm font-medium">Correção após finalização</p><p className="text-xs text-muted-foreground">O conteúdo original permanece imutável.</p></div><DialogTrigger asChild><Button type="button" size="sm" variant="outline">Criar adendo</Button></DialogTrigger></div><DialogContent><DialogHeader><DialogTitle>Novo adendo clínico</DialogTitle><DialogDescription>Registre somente a informação complementar e uma justificativa. O prontuário original não será sobrescrito.</DialogDescription></DialogHeader><label className="text-sm font-medium">Justificativa<textarea className="mt-1 min-h-20 w-full rounded-md border bg-background p-2 text-sm" value={reason} onChange={(event) => setReason(event.target.value)} /></label><label className="text-sm font-medium">Conteúdo do adendo<textarea className="mt-1 min-h-32 w-full rounded-md border bg-background p-2 text-sm" value={content} onChange={(event) => setContent(event.target.value)} /></label><DialogFooter><DialogClose asChild><Button variant="outline">Cancelar</Button></DialogClose><Button onClick={submit} disabled={saving || !content.trim() || !reason.trim()}>{saving && <Loader2 className="animate-spin" />} Registrar adendo</Button></DialogFooter></DialogContent></Dialog>;
 }

@@ -5,6 +5,7 @@ import type {
 
 export type PatientTimelineDocument = {
   id: string;
+  appointment_id?: string;
   title: string;
   document_type: string;
   status: string;
@@ -48,6 +49,7 @@ function documentKind(type: string): PatientTimelineEvent["kind"] {
 export function buildPatientTimelineEvents(
   history: MedicalRecordHistoryItem[],
   documents: PatientTimelineDocument[],
+  addenda: Array<{ id:string; content:string; reason:string; created_at:string }> = [],
 ): PatientTimelineEvent[] {
   const consultations = history.map<PatientTimelineEvent>((record) => {
     const details = [
@@ -101,7 +103,8 @@ export function buildPatientTimelineEvents(
     };
   });
 
-  return [...consultations, ...documentEvents].sort((left, right) =>
+  const addendumEvents = addenda.map<PatientTimelineEvent>((item) => ({ id:`addendum:${item.id}`, kind:"document", date:item.created_at.slice(0,10), time:item.created_at.slice(11,16), title:"Adendo clínico", href:null, professional:null, status:"Registrado", details:[{label:"Justificativa",value:item.reason},{label:"Conteúdo",value:item.content}], searchableText:`adendo ${item.reason} ${item.content}`.toLocaleLowerCase("pt-BR") }));
+  return [...consultations, ...documentEvents, ...addendumEvents].sort((left, right) =>
     `${right.date} ${right.time || ""}`.localeCompare(
       `${left.date} ${left.time || ""}`,
     ),
