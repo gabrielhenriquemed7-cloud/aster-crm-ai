@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import {
+  MAX_AUDIO_SIZE_BYTES,
+  MAX_SEGMENT_DURATION_SECONDS,
+} from "@/lib/audio/transcription-segments";
 
-const MAX_AUDIO_SIZE = 25 * 1024 * 1024;
-const MAX_DURATION_SECONDS = 30 * 60;
 const ALLOWED_MIME_TYPES = new Set([
   "audio/webm",
   "audio/mp4",
@@ -109,7 +111,10 @@ export async function POST(request: Request) {
         "O formato do áudio não pôde ser processado.",
         415,
       );
-    if (audio.size > MAX_AUDIO_SIZE || durationSeconds > MAX_DURATION_SECONDS)
+    if (
+      audio.size > MAX_AUDIO_SIZE_BYTES ||
+      durationSeconds > MAX_SEGMENT_DURATION_SECONDS
+    )
       return responseError(
         "AUDIO_TOO_LARGE",
         "A gravação excedeu o tamanho permitido.",
@@ -187,12 +192,16 @@ export async function POST(request: Request) {
             : openAiResponse.status === 400
               ? "TRANSCRIPTION_INVALID_AUDIO"
               : "TRANSCRIPTION_ERROR";
+      const httpStatus =
+        openAiResponse.status === 429 || openAiResponse.status >= 500
+          ? openAiResponse.status
+          : 500;
       throw Object.assign(
         new Error(
           errorPayload?.error?.message ||
             "Não foi possível transcrever a gravação.",
         ),
-        { code },
+        { code, httpStatus },
       );
     }
     const payload = (await openAiResponse.json()) as { text?: string };
@@ -211,6 +220,10 @@ export async function POST(request: Request) {
       error instanceof Error
         ? error.message
         : "Não foi possível transcrever a gravação.";
+    const httpStatus =
+      error && typeof error === "object" && "httpStatus" in error
+        ? Number(error.httpStatus)
+        : 500;
     if (audit) await audit("transcription_failed").catch(() => undefined);
     console.error("ASTER_TRANSCRIPTION_ERROR", {
       code,
@@ -221,6 +234,6 @@ export async function POST(request: Request) {
       mimeType,
       fileSize,
     });
-    return responseError(code, message, 500);
+    return responseError(code, message, httpStatus);
   }
 }
