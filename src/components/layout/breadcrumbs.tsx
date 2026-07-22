@@ -11,6 +11,7 @@ const labels: Record<string, string> = {
   patients: "Pacientes",
   prontuario: "Prontuário",
   documentos: "Documentos",
+  continuidade: "Continuidade do cuidado",
   configuracoes: "Configurações",
   profile: "Perfil",
   settings: "Configurações",

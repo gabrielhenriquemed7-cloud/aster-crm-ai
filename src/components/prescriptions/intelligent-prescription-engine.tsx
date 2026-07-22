@@ -17,7 +17,7 @@ import {
   Trash2,
   ExternalLink,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { PrescriptionMedicationEditor } from "@/components/prescriptions/prescription-medication-editor";
@@ -46,6 +46,7 @@ import { useMedicationCatalogSearch } from "@/hooks/use-medication-catalog-searc
 import { createEmptyMedication } from "@/lib/prescription-engine/prescription-factory";
 import { optionsForForm } from "@/lib/prescription-engine/structured-options";
 import { favoritePrescriptionTemplates } from "@/lib/prescription-engine/templates";
+import { prescriptionConsistencyAlerts } from "@/lib/prescription-engine/validation";
 import type {
   PrescriptionDocument,
   PrescriptionDraft,
@@ -86,6 +87,7 @@ export function IntelligentPrescriptionEngine({
   const [panel, setPanel] = useState<LibraryPanel>(null);
   const [search, setSearch] = useState("");
   const [librarySearch, setLibrarySearch] = useState("");
+  const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
   const [editing, setEditing] = useState<PrescriptionMedication | null>(null);
   const [confirmTemplate, setConfirmTemplate] =
     useState<PrescriptionTemplate | null>(null);
@@ -99,6 +101,10 @@ export function IntelligentPrescriptionEngine({
   const idempotencyKey = useRef(crypto.randomUUID());
   const issuing = useRef(false);
   const catalog = useMedicationCatalogSearch(search);
+  const consistencyAlerts = useMemo(
+    () => prescriptionConsistencyAlerts(engine.document.medications),
+    [engine.document.medications],
+  );
 
   useEffect(() => {
     draftChangeCallback.current = onDraftChange;
@@ -270,9 +276,21 @@ export function IntelligentPrescriptionEngine({
                 <div
                   className="relative"
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") {
+                    if (event.key === "ArrowDown" && catalog.results.length) {
                       event.preventDefault();
-                      beginMedication();
+                      setActiveSearchIndex((current) =>
+                        Math.min(current + 1, catalog.results.length - 1),
+                      );
+                    } else if (event.key === "ArrowUp" && catalog.results.length) {
+                      event.preventDefault();
+                      setActiveSearchIndex((current) => Math.max(current - 1, 0));
+                    } else if (event.key === "Escape") {
+                      setSearch("");
+                    } else if (event.key === "Enter") {
+                      event.preventDefault();
+                      const selected = catalog.results[activeSearchIndex];
+                      if (selected) selectCatalogMedication(selected);
+                      else beginMedication();
                     }
                   }}
                 >
@@ -282,12 +300,16 @@ export function IntelligentPrescriptionEngine({
                     aria-label="Pesquisar medicamento"
                     aria-autocomplete="list"
                     aria-controls="medication-catalog-results"
+                    aria-activedescendant={activeSearchIndex >= 0 ? `medication-result-${activeSearchIndex}` : undefined}
                     aria-expanded={Boolean(search.trim().length >= 2)}
                     className="h-11 pr-24 pl-9 text-sm"
                     disabled={disabled}
                     value={search}
                     placeholder="Pesquisar medicamento..."
-                    onChange={(event) => setSearch(event.target.value)}
+                    onChange={(event) => {
+                      setSearch(event.target.value);
+                      setActiveSearchIndex(-1);
+                    }}
                   />
                   <Button type="button" size="sm" className="absolute top-2 right-2" disabled={disabled || !search.trim()} onClick={beginMedication}>
                     Adicionar
@@ -304,13 +326,14 @@ export function IntelligentPrescriptionEngine({
                         <Loader2 className="size-4 animate-spin" /> Pesquisando catálogo da Anvisa...
                       </div>
                     ) : catalog.results.length ? (
-                      catalog.results.map((result) => (
+                      catalog.results.map((result, index) => (
                         <button
                           type="button"
                           role="option"
                           aria-selected="false"
+                          id={`medication-result-${index}`}
                           key={result.presentationId ?? result.sourceKey}
-                          className="w-full rounded-sm px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          className={`w-full rounded-sm px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${activeSearchIndex === index ? "bg-muted" : ""}`}
                           onClick={() => selectCatalogMedication(result)}
                         >
                           <span className="block text-sm font-medium">
@@ -387,6 +410,18 @@ export function IntelligentPrescriptionEngine({
               )}
             </section>
 
+            {consistencyAlerts.length > 0 && (
+              <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-800 dark:text-amber-200">
+                <p className="font-semibold">Revisar possíveis duplicidades</p>
+                <ul className="mt-1 space-y-1">
+                  {consistencyAlerts.map((alert, index) => (
+                    <li key={`${alert.code}-${index}`}>• {alert.message}</li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-muted-foreground">O alerta é documental e não bloqueia uma decisão clínica justificada.</p>
+              </div>
+            )}
+
             {engine.document.medications.length > 0 && (
               <Button type="button" disabled={disabled || Boolean(editing)} onClick={() => setReviewOpen(true)}>
                 <FilePenLine /> Gerar Receita
@@ -430,7 +465,7 @@ export function IntelligentPrescriptionEngine({
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Revisar rascunho da receita</DialogTitle>
-            <DialogDescription>Confira os dados antes de inserir o documento no prontuário.</DialogDescription>
+            <DialogDescription>Esta confirmação registra sua revisão médica, finaliza o documento e o vincula ao prontuário e à Timeline.</DialogDescription>
           </DialogHeader>
           <pre className="whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 font-sans text-xs leading-5">{engine.preview}</pre>
           {issueError && (
@@ -446,7 +481,7 @@ export function IntelligentPrescriptionEngine({
                 ? "Salvando receita..."
                 : issueState === "generating"
                   ? "Gerando documento..."
-                  : "Inserir rascunho revisado"}
+                  : "Revisar e inserir no prontuário"}
             </Button>
           </DialogFooter>
         </DialogContent>

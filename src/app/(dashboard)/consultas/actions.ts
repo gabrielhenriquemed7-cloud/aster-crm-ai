@@ -551,6 +551,16 @@ export async function issuePrescriptionFromMedicalRecord(
       appointmentId,
       idempotencyKey,
     });
+    if (
+      error?.code === "23514" &&
+      `${error.message ?? ""} ${error.details ?? ""}`.includes(
+        "clinical_documents_physician_review_required",
+      )
+    )
+      return {
+        error:
+          "Não foi possível concluir a prescrição porque a revisão médica não foi registrada corretamente. Revise o documento e tente novamente.",
+      };
     return { error: "Não foi possível emitir a receita. Revise os dados e tente novamente." };
   }
 
@@ -653,6 +663,16 @@ export async function finalizeClinicalEncounter(
   revalidatePath("/appointments");
   revalidatePath("/dashboard");
   revalidatePath("/recepcao");
+  const continuity = await current.supabase.rpc(
+    "create_encounter_continuity_items",
+    { target_appointment_id: appointmentId },
+  );
+  if (continuity.error && continuity.error.code !== "PGRST202")
+    console.error("ASTER_CONTINUITY_CREATE_ERROR", {
+      code: continuity.error.code,
+      appointmentId,
+    });
+  revalidatePath("/continuidade");
   await onConsultationFinalized({ appointmentId, patientId: "", actorId: current.userId, occurredAt: new Date().toISOString() });
   return {
     success:
