@@ -13,8 +13,6 @@ export async function GET(request: NextRequest) {
     if (supabase) {
       const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (!error) {
-        const { error: inviteError } = await supabase.rpc("accept_my_clinic_invites");
-        if (inviteError) return NextResponse.redirect(`${origin}${next}?error=invite_acceptance`);
         return NextResponse.redirect(`${origin}${next}`);
       }
     }
