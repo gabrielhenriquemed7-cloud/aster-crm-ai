@@ -17,6 +17,7 @@ import { recordTranscriptionEvent } from "@/app/(dashboard)/consultas/transcript
 import { Button } from "@/components/ui/button";
 import {
   type AudioSegment,
+  audioExtensionForMimeType,
   isTransientTranscriptionError,
   joinSegmentTranscriptions,
   MAX_AUDIO_SIZE_BYTES,
@@ -25,6 +26,8 @@ import {
   ROTATE_AUDIO_SIZE_BYTES,
   SAFE_AUDIO_SIZE_BYTES,
   SEGMENT_DURATION_SECONDS,
+  selectSupportedRecorderMimeType,
+  validateAudioSegment,
 } from "@/lib/audio/transcription-segments";
 import {
   Dialog,
@@ -37,7 +40,16 @@ import {
 } from "@/components/ui/dialog";
 
 type RecorderState =
-  "idle" | "testing" | "recording" | "paused" | "finalizing" | "transcribing";
+  | "idle"
+  | "testing"
+  | "recording"
+  | "paused"
+  | "finalizing"
+  | "ready"
+  | "transcribing"
+  | "error"
+  | "cancelled"
+  | "completed";
 type InsertMode = "append" | "replace";
 type CaptureSummary = {
   blob: Blob;
@@ -71,25 +83,30 @@ const errorMessages: Record<string, string> = {
   AUDIO_CONTEXT_SUSPENDED:
     "O monitoramento de áudio foi suspenso pelo navegador.",
   INCOMPLETE_RECORDING: "A gravação pode estar incompleta.",
-  AUDIO_TOO_LARGE:
+  SEGMENT_TOO_LARGE:
     "Este segmento excede o limite seguro de 20 MB. O áudio foi preservado.",
-  TRANSCRIPTION_AUTH_ERROR:
-    "Não foi possível autenticar o serviço de transcrição.",
-  TRANSCRIPTION_QUOTA_ERROR: "O limite do serviço de transcrição foi atingido.",
-  TRANSCRIPTION_INVALID_AUDIO: "O formato do áudio não pôde ser processado.",
-  TRANSCRIPTION_TIMEOUT:
-    "A transcrição demorou mais que o esperado. Tente novamente.",
-  TRANSCRIPTION_FAILED:
+  EMPTY_SEGMENT: "Um segmento vazio foi descartado antes do envio.",
+  INVALID_AUDIO_SEGMENT: "Um segmento de áudio capturado não é válido.",
+  UNSUPPORTED_AUDIO_FORMAT:
+    "O segmento foi capturado em um formato que o serviço não conseguiu processar.",
+  SESSION_EXPIRED: "Sua sessão expirou. Entre novamente.",
+  UNAUTHORIZED: "Você não possui permissão para transcrever esta consulta.",
+  RATE_LIMITED: "O serviço está temporariamente ocupado. Tente novamente.",
+  PROVIDER_UNAVAILABLE:
+    "O serviço de transcrição está temporariamente indisponível.",
+  NETWORK_ERROR: "A conexão foi interrompida durante o envio.",
+  TIMEOUT: "A transcrição demorou mais que o esperado. Tente novamente.",
+  UNKNOWN_TRANSCRIPTION_ERROR:
     "O áudio foi captado, mas não foi possível transcrevê-lo.",
+  ABORTED:
+    "O envio foi cancelado. A gravação permanece disponível nesta página.",
   TRANSCRIPTION_ERROR: "Não foi possível transcrever a gravação.",
 };
 
 function supportedMimeType() {
   if (typeof MediaRecorder === "undefined") return "";
-  return (
-    ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((type) =>
-      MediaRecorder.isTypeSupported(type),
-    ) ?? ""
+  return selectSupportedRecorderMimeType((type) =>
+    MediaRecorder.isTypeSupported(type),
   );
 }
 
@@ -181,7 +198,8 @@ export function ClinicalAudioRecorder({
     trackRef.current = null;
     recorderRef.current = null;
     chunksRef.current = [];
-    if (rotateTimerRef.current !== null) window.clearTimeout(rotateTimerRef.current);
+    if (rotateTimerRef.current !== null)
+      window.clearTimeout(rotateTimerRef.current);
     rotateTimerRef.current = null;
     setTrackStatus("inactive");
     setLevel(0);
@@ -199,7 +217,8 @@ export function ClinicalAudioRecorder({
   }, [state]);
 
   useEffect(() => {
-    if (state !== "recording" && state !== "paused" && state !== "transcribing") return;
+    if (state !== "recording" && state !== "paused" && state !== "transcribing")
+      return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
@@ -407,7 +426,10 @@ export function ClinicalAudioRecorder({
         setChunkCount(chunksRef.current.length);
         setCapturedBytes((value) => value + event.data.size);
         setStalled(false);
-        if (segmentBytesRef.current >= ROTATE_AUDIO_SIZE_BYTES && recorder.state === "recording") {
+        if (
+          segmentBytesRef.current >= ROTATE_AUDIO_SIZE_BYTES &&
+          recorder.state === "recording"
+        ) {
           rotatingRef.current = true;
           recorder.stop();
         }
@@ -418,7 +440,8 @@ export function ClinicalAudioRecorder({
         lastChunkAtRef.current = startedAt;
         lastLevelAtRef.current = startedAt;
         setState("recording");
-        setSuccess("Gravação iniciada");
+        setSuccess("");
+        setError("");
       };
       recorder.onpause = () => setState("paused");
       recorder.onresume = () => setState("recording");
@@ -547,7 +570,7 @@ export function ClinicalAudioRecorder({
 
   async function handleStopped() {
     const action = stopActionRef.current;
-    const mimeType = recorderRef.current?.mimeType || "audio/webm";
+    const mimeType = recorderRef.current?.mimeType || supportedMimeType();
     const blob = new Blob(chunksRef.current, { type: mimeType });
     const endedAt = nowMs();
     if (blob.size) {
@@ -556,7 +579,10 @@ export function ClinicalAudioRecorder({
         index: completedSegmentsRef.current.length,
         startedAt: segmentStartedAtRef.current,
         endedAt,
-        durationSeconds: Math.max(1, Math.round((endedAt - segmentStartedAtRef.current) / 1000)),
+        durationSeconds: Math.max(
+          1,
+          Math.round((endedAt - segmentStartedAtRef.current) / 1000),
+        ),
         sizeBytes: blob.size,
         mimeType,
         blob,
@@ -571,7 +597,9 @@ export function ClinicalAudioRecorder({
       rotatingRef.current = false;
       const stream = streamRef.current;
       const nextMime = supportedMimeType();
-      const next = nextMime ? new MediaRecorder(stream, { mimeType: nextMime }) : new MediaRecorder(stream);
+      const next = nextMime
+        ? new MediaRecorder(stream, { mimeType: nextMime })
+        : new MediaRecorder(stream);
       recorderRef.current = next;
       chunksRef.current = [];
       segmentBytesRef.current = 0;
@@ -583,7 +611,10 @@ export function ClinicalAudioRecorder({
         lastChunkAtRef.current = Date.now();
         setChunkCount((value) => value + 1);
         setCapturedBytes((value) => value + event.data.size);
-        if (segmentBytesRef.current >= ROTATE_AUDIO_SIZE_BYTES && next.state === "recording") {
+        if (
+          segmentBytesRef.current >= ROTATE_AUDIO_SIZE_BYTES &&
+          next.state === "recording"
+        ) {
           rotatingRef.current = true;
           next.stop();
         }
@@ -606,7 +637,10 @@ export function ClinicalAudioRecorder({
       seconds,
       Math.round((nowMs() - startedAtRef.current) / 1000),
     );
-    const totalSize = completedSegmentsRef.current.reduce((total, segment) => total + segment.sizeBytes, 0);
+    const totalSize = completedSegmentsRef.current.reduce(
+      (total, segment) => total + segment.sizeBytes,
+      0,
+    );
     const capture: CaptureSummary = {
       blob,
       segments: [...completedSegmentsRef.current],
@@ -634,8 +668,9 @@ export function ClinicalAudioRecorder({
       cleanup();
       return;
     }
+    setSuccess("");
     setSummary(capture);
-    setState("idle");
+    setState("ready");
   }
 
   async function uploadAudio(capture: CaptureSummary) {
@@ -643,49 +678,131 @@ export function ClinicalAudioRecorder({
       setError(`NO_AUDIO_DATA: ${errorMessages.NO_AUDIO_DATA}`);
       return;
     }
-    if (capture.segments.some((segment) => segment.sizeBytes > SAFE_AUDIO_SIZE_BYTES)) {
-      setError(errorMessages.AUDIO_TOO_LARGE);
+    if (
+      capture.segments.some(
+        (segment) => segment.sizeBytes > SAFE_AUDIO_SIZE_BYTES,
+      )
+    ) {
+      setError(errorMessages.SEGMENT_TOO_LARGE);
+      setState("error");
       return;
     }
     uploadInProgressRef.current = true;
     setTranscriptionProgress(0);
     setSummary(null);
+    setError("");
+    setSuccess("");
+    setWarning("");
     setState("transcribing");
-    abortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const working = capture.segments.map((segment) => ({ ...segment }));
     try {
-      const working = [...capture.segments];
       for (let index = 0; index < working.length; index += 1) {
         const segment = working[index];
         if (segment.status === "completed" && segment.transcription) {
           setTranscriptionProgress((value) => value + 1);
           continue;
         }
+        const validationCode = validateAudioSegment(
+          segment,
+          index === working.length - 1,
+        );
+        if (validationCode) {
+          segment.status = "failed";
+          segment.error = errorMessages[validationCode];
+          setSegments([...working]);
+          throw Object.assign(new Error(segment.error), {
+            code: validationCode,
+          });
+        }
         let attempt = 0;
         while (true) {
           segment.status = "uploading";
           setSegments([...working]);
-          const mimeType = segment.mimeType.split(";")[0] || "audio/webm";
+          const mimeType = segment.mimeType.split(";")[0].toLowerCase();
+          const extension = audioExtensionForMimeType(mimeType);
           const formData = new FormData();
           formData.append("appointmentId", appointmentId);
           formData.append("durationSeconds", String(segment.durationSeconds));
-          formData.append("audio", new File([segment.blob], `consulta-${index + 1}.${mimeType === "audio/mp4" ? "mp4" : "webm"}`, { type: mimeType }));
-          const response = await fetch("/api/clinical-ai/transcribe", { method: "POST", body: formData, signal: abortControllerRef.current.signal });
-          const payload = (await response.json()) as { text?: string; error?: { code?: string; message?: string } };
-          if (response.ok && payload.text) {
+          formData.append("segmentIndex", String(segment.index));
+          formData.append("totalSegments", String(working.length));
+          formData.append(
+            "audio",
+            new File([segment.blob], `consulta-${index + 1}.${extension}`, {
+              type: mimeType,
+            }),
+          );
+          if (process.env.NODE_ENV === "development")
+            console.debug("ASTER_TRANSCRIPTION_SEGMENT", {
+              segmentIndex: segment.index,
+              sizeBytes: segment.sizeBytes,
+              mimeType,
+              durationSeconds: segment.durationSeconds,
+              uploadStarted: true,
+            });
+          let response: Response;
+          let payload: {
+            success?: boolean;
+            segmentIndex?: number;
+            transcription?: string;
+            error?: { code?: string; category?: string; message?: string };
+          };
+          try {
+            response = await fetch("/api/clinical-ai/transcribe", {
+              method: "POST",
+              body: formData,
+              signal: controller.signal,
+            });
+            payload = await response.json().catch(() => ({}));
+            if (process.env.NODE_ENV === "development")
+              console.debug("ASTER_TRANSCRIPTION_SEGMENT", {
+                segmentIndex: segment.index,
+                sizeBytes: segment.sizeBytes,
+                mimeType,
+                durationSeconds: segment.durationSeconds,
+                uploadCompleted: true,
+                transcriptionCompleted: Boolean(response.ok && payload.success),
+                providerStatus: response.status,
+                errorCode: payload.error?.code,
+                errorCategory: payload.error?.category,
+              });
+          } catch (cause) {
+            if (cause instanceof DOMException && cause.name === "AbortError")
+              throw Object.assign(cause, { code: "ABORTED" });
+            const code = "NETWORK_ERROR";
+            if (attempt < 2) {
+              segment.retryCount = ++attempt;
+              await new Promise((resolve) =>
+                window.setTimeout(resolve, retryDelayMs(attempt - 1)),
+              );
+              continue;
+            }
+            throw Object.assign(new Error(errorMessages[code]), { code });
+          }
+          if (response.ok && payload.success && payload.transcription) {
             segment.status = "completed";
-            segment.transcription = payload.text;
-            setTranscriptionProgress(index + 1);
+            segment.transcription = payload.transcription;
+            setTranscriptionProgress(
+              working.filter((item) => item.status === "completed").length,
+            );
             setSegments([...working]);
             break;
           }
-          const code = payload.error?.code || "TRANSCRIPTION_FAILED";
-          if (attempt < 2 && isTransientTranscriptionError(response.status, code)) {
+          const code = payload.error?.code || "UNKNOWN_TRANSCRIPTION_ERROR";
+          if (
+            attempt < 2 &&
+            isTransientTranscriptionError(response.status, code)
+          ) {
             segment.retryCount = ++attempt;
-            await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs(attempt - 1)));
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, retryDelayMs(attempt - 1)),
+            );
             continue;
           }
           segment.status = "failed";
-          segment.error = errorMessages[code] || errorMessages.TRANSCRIPTION_FAILED;
+          segment.error =
+            errorMessages[code] || errorMessages.UNKNOWN_TRANSCRIPTION_ERROR;
           setSegments([...working]);
           throw Object.assign(new Error(segment.error), { code });
         }
@@ -699,26 +816,47 @@ export function ClinicalAudioRecorder({
         onApply(text, "replace");
       }
       setSuccess("Transcrição concluída");
+      setState("completed");
     } catch (cause) {
       const code =
         cause instanceof DOMException && cause.name === "AbortError"
-          ? "AbortError"
+          ? "ABORTED"
           : cause && typeof cause === "object" && "code" in cause
-          ? String(cause.code)
-          : "TRANSCRIPTION_FAILED";
-      setSummary(capture);
-      if (code !== "AbortError") setError(errorMessages[code] || errorMessages.TRANSCRIPTION_FAILED);
+            ? String(cause.code)
+            : "UNKNOWN_TRANSCRIPTION_ERROR";
+      const failedIndex = Math.max(
+        0,
+        working.findIndex((segment) => segment.status === "failed"),
+      );
+      setSegments([...working]);
+      setSummary({ ...capture, segments: working });
+      if (code === "ABORTED") {
+        setWarning(errorMessages.ABORTED);
+        setState("cancelled");
+      } else {
+        const segmentNumber = failedIndex + 1;
+        setError(
+          `${errorMessages[code] || errorMessages.UNKNOWN_TRANSCRIPTION_ERROR} O áudio foi preservado. Segmento ${segmentNumber}.`,
+        );
+        setState("error");
+      }
     } finally {
-      setState("idle");
       uploadInProgressRef.current = false;
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller)
+        abortControllerRef.current = null;
     }
   }
 
   function cancelTranscription() {
     abortControllerRef.current?.abort();
-    setSegments((current) => current.map((segment) => segment.status === "completed" ? segment : { ...segment, status: "cancelled" }));
-    setState("idle");
+    setSegments((current) =>
+      current.map((segment) =>
+        segment.status === "completed"
+          ? segment
+          : { ...segment, status: "cancelled" },
+      ),
+    );
+    setState("cancelled");
     setWarning("Envio cancelado. A gravação continua preservada nesta página.");
   }
 
@@ -743,7 +881,11 @@ export function ClinicalAudioRecorder({
   return (
     <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        {state === "idle" && (
+        {(state === "idle" ||
+          state === "ready" ||
+          state === "error" ||
+          state === "cancelled" ||
+          state === "completed") && (
           <>
             <Button type="button" disabled={disabled} onClick={start}>
               <Mic /> Iniciar gravação
@@ -836,11 +978,20 @@ export function ClinicalAudioRecorder({
       {state === "transcribing" && (
         <div className="space-y-2" role="status">
           <div className="flex justify-between text-sm">
-            <span>Transcrevendo {Math.min(transcriptionProgress + 1, segments.length)} de {segments.length} segmentos</span>
+            <span>
+              Transcrevendo{" "}
+              {Math.min(transcriptionProgress + 1, segments.length)} de{" "}
+              {segments.length} segmentos
+            </span>
             <span>{transcriptionProgress} concluído(s)</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-muted">
-            <div className="h-full bg-primary transition-all" style={{ width: `${segments.length ? (transcriptionProgress / segments.length) * 100 : 0}%` }} />
+            <div
+              className="h-full bg-primary transition-all"
+              style={{
+                width: `${segments.length ? (transcriptionProgress / segments.length) * 100 : 0}%`,
+              }}
+            />
           </div>
         </div>
       )}
@@ -888,7 +1039,7 @@ export function ClinicalAudioRecorder({
           {error}
         </p>
       )}
-      {success && (
+      {success && state !== "recording" && state !== "transcribing" && (
         <p role="status" className="text-sm text-emerald-700">
           {success}
         </p>
@@ -982,11 +1133,26 @@ export function ClinicalAudioRecorder({
                 <dt>Segmentos</dt>
                 <dd>{summary.segments.length}</dd>
                 <dt>Concluídos</dt>
-                <dd>{summary.segments.filter((segment) => segment.status === "completed").length}</dd>
+                <dd>
+                  {
+                    summary.segments.filter(
+                      (segment) => segment.status === "completed",
+                    ).length
+                  }
+                </dd>
                 <dt>Erros</dt>
-                <dd>{summary.segments.filter((segment) => segment.status === "failed").length}</dd>
+                <dd>
+                  {
+                    summary.segments.filter(
+                      (segment) => segment.status === "failed",
+                    ).length
+                  }
+                </dd>
                 <dt>Limite por envio</dt>
-                <dd>{formatSize(MAX_AUDIO_SIZE_BYTES)} (margem segura: {formatSize(SAFE_AUDIO_SIZE_BYTES)})</dd>
+                <dd>
+                  {formatSize(MAX_AUDIO_SIZE_BYTES)} (margem segura:{" "}
+                  {formatSize(SAFE_AUDIO_SIZE_BYTES)})
+                </dd>
                 <dt>Status</dt>
                 <dd>
                   {summary.incomplete
@@ -1000,11 +1166,27 @@ export function ClinicalAudioRecorder({
                   transcrever o conteúdo disponível?
                 </p>
               )}
-              {summary.size > MAX_AUDIO_SIZE_BYTES && summary.segments.every((segment) => segment.sizeBytes <= SAFE_AUDIO_SIZE_BYTES) && (
-                <p className="text-blue-700">
-                  A gravação é maior que o limite de envio único e será processada em partes automaticamente.
+              {summary.segments.some(
+                (segment) => segment.status === "failed",
+              ) && (
+                <p role="alert" className="text-destructive">
+                  Falha no segmento{" "}
+                  {summary.segments.findIndex(
+                    (segment) => segment.status === "failed",
+                  ) + 1}{" "}
+                  de {summary.segments.length}. Os segmentos concluídos e o
+                  áudio capturado foram preservados.
                 </p>
               )}
+              {summary.size > MAX_AUDIO_SIZE_BYTES &&
+                summary.segments.every(
+                  (segment) => segment.sizeBytes <= SAFE_AUDIO_SIZE_BYTES,
+                ) && (
+                  <p className="text-blue-700">
+                    A gravação é maior que o limite de envio único e será
+                    processada em partes automaticamente.
+                  </p>
+                )}
             </div>
           )}
           <DialogFooter>
@@ -1030,9 +1212,13 @@ export function ClinicalAudioRecorder({
             >
               {summary?.incomplete
                 ? "Transcrever mesmo assim"
-                : summary?.segments.some((segment) => segment.status === "failed" || segment.status === "cancelled")
-                  ? "Tentar novamente"
-                : "Enviar para transcrição"}
+                : summary?.segments.some(
+                      (segment) =>
+                        segment.status === "failed" ||
+                        segment.status === "cancelled",
+                    )
+                  ? `Tentar novamente o segmento ${Math.max(1, (summary?.segments.findIndex((segment) => segment.status === "failed" || segment.status === "cancelled") ?? 0) + 1)}`
+                  : "Enviar para transcrição"}
             </Button>
           </DialogFooter>
         </DialogContent>

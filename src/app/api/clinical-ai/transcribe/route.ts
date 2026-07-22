@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 import {
+  audioExtensionForMimeType,
   MAX_AUDIO_SIZE_BYTES,
   MAX_SEGMENT_DURATION_SECONDS,
 } from "@/lib/audio/transcription-segments";
@@ -24,7 +25,21 @@ type AuditStatus =
   | "transcription_failed";
 
 function responseError(code: string, message: string, status: number) {
-  return NextResponse.json({ error: { code, message } }, { status });
+  const category =
+    code === "ABORTED"
+      ? "cancelled"
+      : [
+            "NETWORK_ERROR",
+            "TIMEOUT",
+            "RATE_LIMITED",
+            "PROVIDER_UNAVAILABLE",
+          ].includes(code)
+        ? "transient"
+        : "permanent";
+  return NextResponse.json(
+    { success: false, error: { code, category, message } },
+    { status },
+  );
 }
 
 export async function POST(request: Request) {
@@ -33,16 +48,22 @@ export async function POST(request: Request) {
   let hasAppointment = false;
   let mimeType: string | undefined;
   let fileSize: number | undefined;
+  let segmentIndex = 0;
+  let durationSeconds = 0;
   let audit:
     ((status: AuditStatus, model?: string) => Promise<void>) | undefined;
   try {
     const supabase = await createClient();
     if (!supabase)
-      return responseError("TRANSCRIPTION_ERROR", "Serviço indisponível.", 503);
+      return responseError(
+        "PROVIDER_UNAVAILABLE",
+        "Serviço indisponível.",
+        503,
+      );
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user)
       return responseError(
-        "TRANSCRIPTION_ERROR",
+        "SESSION_EXPIRED",
         "Sua sessão expirou. Entre novamente.",
         401,
       );
@@ -53,16 +74,13 @@ export async function POST(request: Request) {
       .eq("id", auth.user.id)
       .maybeSingle();
     if (!profile?.active_clinic_id)
-      return responseError(
-        "TRANSCRIPTION_ERROR",
-        "Selecione uma clínica ativa.",
-        403,
-      );
+      return responseError("UNAUTHORIZED", "Selecione uma clínica ativa.", 403);
     hasActiveClinic = true;
 
     const formData = await request.formData();
     const appointmentId = String(formData.get("appointmentId") ?? "");
-    const durationSeconds = Number(formData.get("durationSeconds") ?? 0);
+    durationSeconds = Number(formData.get("durationSeconds") ?? 0);
+    segmentIndex = Number(formData.get("segmentIndex") ?? 0);
     const audio = formData.get("audio");
     const { data: appointment } = await supabase
       .from("appointments")
@@ -77,7 +95,7 @@ export async function POST(request: Request) {
       appointment.status !== "in_progress"
     )
       return responseError(
-        "TRANSCRIPTION_ERROR",
+        "UNAUTHORIZED",
         "Você não possui permissão para transcrever esta consulta.",
         403,
       );
@@ -93,13 +111,13 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (!consent)
       return responseError(
-        "TRANSCRIPTION_ERROR",
+        "UNAUTHORIZED",
         "Confirme o consentimento do paciente antes de transcrever.",
         403,
       );
     if (!(audio instanceof File) || audio.size === 0)
       return responseError(
-        "AUDIO_EMPTY",
+        "EMPTY_SEGMENT",
         "Nenhum áudio válido foi capturado.",
         400,
       );
@@ -107,7 +125,7 @@ export async function POST(request: Request) {
     fileSize = audio.size;
     if (!ALLOWED_MIME_TYPES.has(mimeType))
       return responseError(
-        "TRANSCRIPTION_INVALID_AUDIO",
+        "UNSUPPORTED_AUDIO_FORMAT",
         "O formato do áudio não pôde ser processado.",
         415,
       );
@@ -116,7 +134,7 @@ export async function POST(request: Request) {
       durationSeconds > MAX_SEGMENT_DURATION_SECONDS
     )
       return responseError(
-        "AUDIO_TOO_LARGE",
+        "SEGMENT_TOO_LARGE",
         "A gravação excedeu o tamanho permitido.",
         413,
       );
@@ -146,7 +164,7 @@ export async function POST(request: Request) {
     openAiForm.append(
       "file",
       audio,
-      audio.name || `consulta.${mimeType === "audio/mp4" ? "mp4" : "webm"}`,
+      audio.name || `consulta.${audioExtensionForMimeType(mimeType) ?? "bin"}`,
     );
     openAiForm.append("model", model);
     openAiForm.append("language", "pt");
@@ -169,11 +187,11 @@ export async function POST(request: Request) {
     } catch (error) {
       const code =
         error instanceof Error && error.name === "TimeoutError"
-          ? "TRANSCRIPTION_TIMEOUT"
-          : "TRANSCRIPTION_ERROR";
+          ? "TIMEOUT"
+          : "NETWORK_ERROR";
       throw Object.assign(
         new Error(
-          code === "TRANSCRIPTION_TIMEOUT"
+          code === "TIMEOUT"
             ? "A transcrição demorou mais que o esperado. Tente novamente."
             : "Não foi possível transcrever a gravação.",
         ),
@@ -186,16 +204,20 @@ export async function POST(request: Request) {
       } | null;
       const code =
         openAiResponse.status === 401 || openAiResponse.status === 403
-          ? "TRANSCRIPTION_AUTH_ERROR"
+          ? "UNAUTHORIZED"
           : openAiResponse.status === 429
-            ? "TRANSCRIPTION_QUOTA_ERROR"
+            ? "RATE_LIMITED"
             : openAiResponse.status === 400
-              ? "TRANSCRIPTION_INVALID_AUDIO"
-              : "TRANSCRIPTION_ERROR";
+              ? "UNSUPPORTED_AUDIO_FORMAT"
+              : openAiResponse.status >= 500
+                ? "PROVIDER_UNAVAILABLE"
+                : "UNKNOWN_TRANSCRIPTION_ERROR";
       const httpStatus =
-        openAiResponse.status === 429 || openAiResponse.status >= 500
-          ? openAiResponse.status
-          : 500;
+        openAiResponse.status === 400
+          ? 415
+          : openAiResponse.status === 429 || openAiResponse.status >= 500
+            ? openAiResponse.status
+            : 500;
       throw Object.assign(
         new Error(
           errorPayload?.error?.message ||
@@ -207,15 +229,21 @@ export async function POST(request: Request) {
     const payload = (await openAiResponse.json()) as { text?: string };
     if (!payload.text?.trim())
       throw Object.assign(new Error("Nenhuma transcrição foi retornada."), {
-        code: "TRANSCRIPTION_INVALID_AUDIO",
+        code: "INVALID_AUDIO_SEGMENT",
       });
     await audit("transcription_completed", model);
-    return NextResponse.json({ text: payload.text.trim(), model });
+    return NextResponse.json({
+      success: true,
+      segmentIndex,
+      transcription: payload.text.trim(),
+      durationSeconds,
+      model,
+    });
   } catch (error) {
     const code =
       error && typeof error === "object" && "code" in error
         ? String(error.code)
-        : "TRANSCRIPTION_ERROR";
+        : "UNKNOWN_TRANSCRIPTION_ERROR";
     const message =
       error instanceof Error
         ? error.message
@@ -227,13 +255,26 @@ export async function POST(request: Request) {
     if (audit) await audit("transcription_failed").catch(() => undefined);
     console.error("ASTER_TRANSCRIPTION_ERROR", {
       code,
-      message,
       hasAuthenticatedUser,
       hasActiveClinic,
       hasAppointment,
       mimeType,
       fileSize,
+      segmentIndex,
+      durationSeconds,
+      providerStatus: httpStatus,
+      errorCategory: isTransientStatus(httpStatus) ? "transient" : "permanent",
     });
     return responseError(code, message, httpStatus);
   }
+}
+
+function isTransientStatus(status: number) {
+  return (
+    status === 408 ||
+    status === 429 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
 }
