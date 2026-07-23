@@ -55,6 +55,30 @@ test("invite delivery logs the selected flow without tokens or service keys", as
   );
 });
 
+test("temporary delivery diagnostic exposes only safe operational fields", async () => {
+  const actions = await readFile(actionsPath, "utf8");
+  assert.match(actions, /ASTER_INVITE_DELIVERY_SAFE_DIAGNOSTIC/);
+  assert.match(actions, /Falha ao enviar convite:/);
+  assert.match(actions, /MISSING_SERVER_CONFIGURATION/);
+  const safeLog = actions.match(
+    /method\("ASTER_INVITE_DELIVERY_SAFE_DIAGNOSTIC",[\s\S]*?\n\s*\}\);/,
+  )?.[0];
+  assert.ok(safeLog);
+  for (const field of [
+    "stage",
+    "code",
+    "message",
+    "status",
+    "callback",
+    "configuration",
+  ])
+    assert.match(safeLog, new RegExp(field));
+  assert.doesNotMatch(
+    safeLog,
+    /email|fullName|clinicId|invitationId|role|token|password/i,
+  );
+});
+
 test("opening the callback never activates membership", async () => {
   const callback = await readFile(callbackPath, "utf8");
   assert.doesNotMatch(callback, /accept_my_clinic_invites/);

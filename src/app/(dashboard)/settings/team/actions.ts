@@ -107,6 +107,47 @@ function inviteErrorDetails(error: unknown) {
   return { message: String(error), stack: undefined };
 }
 
+type InviteDeliveryConfiguration = {
+  supabaseUrlPresent: boolean;
+  serviceRoleKeyPresent: boolean;
+  siteUrlPresent: boolean;
+};
+
+function inviteDeliverySafeDiagnostic(input: {
+  stage: string;
+  code?: string | null;
+  message?: string | null;
+  status?: number | null;
+  callback?: string | null;
+  configuration: InviteDeliveryConfiguration;
+}) {
+  const method = input.code ? console.error : console.info;
+  method("ASTER_INVITE_DELIVERY_SAFE_DIAGNOSTIC", {
+    stage: input.stage,
+    code: input.code ?? null,
+    message: input.message ?? null,
+    status: input.status ?? null,
+    callback: input.callback ?? null,
+    configuration: input.configuration,
+  });
+}
+
+function inviteTechnicalFailure(error: unknown, fallbackCode: string) {
+  const details = inviteErrorDetails(error) as {
+    code?: unknown;
+    message?: unknown;
+  };
+  const code =
+    typeof details.code === "string" && details.code.trim()
+      ? details.code.trim()
+      : fallbackCode;
+  const message =
+    typeof details.message === "string" && details.message.trim()
+      ? details.message.trim()
+      : "O Supabase não informou detalhes adicionais.";
+  return `Falha ao enviar convite: ${code} — ${message}`;
+}
+
 function sanitizedInvitePayload(input: unknown) {
   if (!input || typeof input !== "object") return { inputType: typeof input };
 
@@ -202,7 +243,23 @@ async function sendInviteEmail(input: {
   });
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const configuration = {
+    supabaseUrlPresent: Boolean(url),
+    serviceRoleKeyPresent: Boolean(serviceKey),
+    siteUrlPresent: Boolean(process.env.NEXT_PUBLIC_SITE_URL?.trim()),
+  };
   if (!url || !serviceKey) {
+    const missingVariables = [
+      !url ? "NEXT_PUBLIC_SUPABASE_URL" : null,
+      !serviceKey ? "SUPABASE_SERVICE_ROLE_KEY" : null,
+    ].filter(Boolean);
+    const technicalMessage = `Falha ao enviar convite: MISSING_SERVER_CONFIGURATION — variável ausente: ${missingVariables.join(", ")}.`;
+    inviteDeliverySafeDiagnostic({
+      stage: "supabase_auth_admin_configuration",
+      code: "MISSING_SERVER_CONFIGURATION",
+      message: "Variável obrigatória ausente.",
+      configuration,
+    });
     inviteDiagnostic("error", "supabase_auth_admin_configuration", {
       invitationId: input.invitationId,
       payload: sanitizedPayload,
@@ -211,8 +268,8 @@ async function sendInviteEmail(input: {
       stack: new Error("Supabase URL ou service role ausente.").stack,
     });
     return {
-      error:
-        "Configure a chave de serviço somente no servidor para enviar convites.",
+      error: "MISSING_SERVER_CONFIGURATION",
+      message: technicalMessage,
     };
   }
   inviteDiagnostic("after", "supabase_auth_admin_configuration", {
@@ -237,7 +294,16 @@ async function sendInviteEmail(input: {
       code: "INVALID_PUBLIC_APP_URL",
       message,
     });
-    return { error: "APP_URL_CONFIGURATION_ERROR", message };
+    inviteDeliverySafeDiagnostic({
+      stage: "invite_callback_configuration",
+      code: "APP_URL_CONFIGURATION_ERROR",
+      message,
+      configuration,
+    });
+    return {
+      error: "APP_URL_CONFIGURATION_ERROR",
+      message: `Falha ao enviar convite: APP_URL_CONFIGURATION_ERROR — ${message}`,
+    };
   }
   const data = {
     full_name: input.fullName ?? "",
@@ -255,6 +321,14 @@ async function sendInviteEmail(input: {
     perPage: 1000,
   });
   if (listError) {
+    inviteDeliverySafeDiagnostic({
+      stage: "supabase_auth_admin_list_users",
+      code: listError.code,
+      message: listError.message,
+      status: listError.status,
+      callback: redirectTo,
+      configuration,
+    });
     inviteDiagnostic("error", "supabase_auth_admin_list_users", {
       invitationId: input.invitationId,
       payload: sanitizedPayload,
@@ -262,8 +336,7 @@ async function sendInviteEmail(input: {
     });
     return {
       error: "EMAIL_PROVIDER_ERROR",
-      message:
-        "Não foi possível enviar o e-mail. O convite foi preservado para nova tentativa.",
+      message: inviteTechnicalFailure(listError, "AUTH_USER_LOOKUP_FAILED"),
     };
   }
   inviteDiagnostic("after", "supabase_auth_admin_list_users", {
@@ -272,6 +345,11 @@ async function sendInviteEmail(input: {
   const existing = users.users.some(
     (user) => user.email?.toLowerCase() === input.email,
   );
+  inviteDeliverySafeDiagnostic({
+    stage: existing ? "magic_link_delivery" : "invite_delivery",
+    callback: redirectTo,
+    configuration,
+  });
   console.info("ASTER_PROFESSIONAL_INVITE_AUTH", {
     flow: existing ? "magic_link" : "invite",
     environment:
@@ -305,6 +383,14 @@ async function sendInviteEmail(input: {
         });
       })();
   if (result.error) {
+    inviteDeliverySafeDiagnostic({
+      stage: existing ? "magic_link_delivery" : "invite_delivery",
+      code: result.error.code,
+      message: result.error.message,
+      status: result.error.status,
+      callback: redirectTo,
+      configuration,
+    });
     inviteDiagnostic("error", "supabase_auth_invite_delivery", {
       invitationId: input.invitationId,
       payload: sanitizedPayload,
@@ -323,8 +409,7 @@ async function sendInviteEmail(input: {
         result.error.status === 429
           ? "EMAIL_RATE_LIMITED"
           : "EMAIL_PROVIDER_ERROR",
-      message:
-        "Não foi possível enviar o e-mail. O convite foi preservado para nova tentativa.",
+      message: inviteTechnicalFailure(result.error, "EMAIL_PROVIDER_ERROR"),
     };
   }
   inviteDiagnostic("after", "supabase_auth_invite_delivery", {
