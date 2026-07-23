@@ -291,10 +291,19 @@ async function sendInviteEmail(input: {
         email: input.email,
         options: { emailRedirectTo: redirectTo, shouldCreateUser: false, data },
       })
-    : await admin.auth.admin.inviteUserByEmail(input.email, {
-        data,
-        redirectTo,
-      });
+    : await (async () => {
+        console.info("ASTER_INVITE_REDIRECT_DIAGNOSTIC", {
+          NODE_ENV: process.env.NODE_ENV,
+          NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+          redirectTo,
+          VERCEL_ENV: process.env.VERCEL_ENV,
+          VERCEL_URL: process.env.VERCEL_URL,
+        });
+        return admin.auth.admin.inviteUserByEmail(input.email, {
+          data,
+          redirectTo,
+        });
+      })();
   if (result.error) {
     inviteDiagnostic("error", "supabase_auth_invite_delivery", {
       invitationId: input.invitationId,
