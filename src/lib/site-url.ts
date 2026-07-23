@@ -65,12 +65,6 @@ export function getSiteUrl() {
   }
 }
 
-export function getProfessionalInviteCallbackUrl(
-  options: PublicAppUrlOptions = {},
-) {
-  return `${resolvePublicAppUrl(options)}/auth/callback?next=/auth/accept-invite`;
-}
-
 export function getRequestOrigin(request: NextRequest) {
   const host =
     request.headers.get("x-forwarded-host") || request.headers.get("host");

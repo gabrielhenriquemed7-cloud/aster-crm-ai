@@ -28,8 +28,30 @@ test("invite carries ASTER metadata and validated redirect", async () => {
   const actions = await readFile(actionsPath, "utf8");
   assert.match(actions, /clinic_name/);
   assert.match(actions, /invitation_id/);
-  assert.match(actions, /getProfessionalInviteCallbackUrl/);
+  assert.match(actions, /resolveServerInviteUrl/);
   assert.match(actions, /APP_URL_CONFIGURATION_ERROR/);
+});
+
+test("redirect diagnostic contains only safe URL resolution fields", async () => {
+  const actions = await readFile(actionsPath, "utf8");
+  const redirectLog = actions.match(
+    /console\.info\("ASTER_INVITE_REDIRECT_DIAGNOSTIC",[\s\S]*?\n\s*\}\);/,
+  )?.[0];
+  assert.ok(redirectLog);
+  for (const field of [
+    "NODE_ENV",
+    "VERCEL_ENV",
+    "APP_URL_PRESENT",
+    "VERCEL_PROJECT_PRODUCTION_URL_PRESENT",
+    "NEXT_PUBLIC_SITE_URL_PRESENT",
+    "siteUrl",
+    "redirectTo",
+  ])
+    assert.match(redirectLog, new RegExp(field));
+  assert.doesNotMatch(
+    redirectLog,
+    /serviceKey|SUPABASE_SERVICE_ROLE_KEY|token|password|email|clinic/i,
+  );
 });
 
 test("invite button never uses signup confirmation APIs", async () => {

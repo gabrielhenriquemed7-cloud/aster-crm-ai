@@ -5,10 +5,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import type { Clinic, TeamRecord } from "@/lib/clinics/types";
-import {
-  getProfessionalInviteCallbackUrl,
-  PublicAppUrlConfigurationError,
-} from "@/lib/site-url";
+import { InviteSiteUrlConfigurationError } from "@/lib/invites/invite-url";
+import { resolveServerInviteUrl } from "@/lib/invites/server-invite-url";
 import { createClient } from "@/lib/supabase/server";
 
 const assignableRoles = [
@@ -246,7 +244,11 @@ async function sendInviteEmail(input: {
   const configuration = {
     supabaseUrlPresent: Boolean(url),
     serviceRoleKeyPresent: Boolean(serviceKey),
-    siteUrlPresent: Boolean(process.env.NEXT_PUBLIC_SITE_URL?.trim()),
+    siteUrlPresent: Boolean(
+      process.env.APP_URL?.trim() ||
+        process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ||
+        process.env.NEXT_PUBLIC_SITE_URL?.trim(),
+    ),
   };
   if (!url || !serviceKey) {
     const missingVariables = [
@@ -279,12 +281,13 @@ async function sendInviteEmail(input: {
   const admin = createAdminClient(url, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+  let siteUrl: string;
   let redirectTo: string;
   try {
-    redirectTo = getProfessionalInviteCallbackUrl();
+    ({ siteUrl, redirectTo } = resolveServerInviteUrl());
   } catch (error) {
     const message =
-      error instanceof PublicAppUrlConfigurationError
+      error instanceof InviteSiteUrlConfigurationError
         ? error.message
         : "Não foi possível resolver a URL pública do ASTER.";
     inviteDiagnostic("error", "invite_callback_configuration", {
@@ -372,10 +375,16 @@ async function sendInviteEmail(input: {
     : await (async () => {
         console.info("ASTER_INVITE_REDIRECT_DIAGNOSTIC", {
           NODE_ENV: process.env.NODE_ENV,
-          NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
-          redirectTo,
           VERCEL_ENV: process.env.VERCEL_ENV,
-          VERCEL_URL: process.env.VERCEL_URL,
+          APP_URL_PRESENT: Boolean(process.env.APP_URL?.trim()),
+          VERCEL_PROJECT_PRODUCTION_URL_PRESENT: Boolean(
+            process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim(),
+          ),
+          NEXT_PUBLIC_SITE_URL_PRESENT: Boolean(
+            process.env.NEXT_PUBLIC_SITE_URL?.trim(),
+          ),
+          siteUrl,
+          redirectTo,
         });
         return admin.auth.admin.inviteUserByEmail(input.email, {
           data,
