@@ -5,12 +5,12 @@
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` (somente servidor; nunca usar prefixo `NEXT_PUBLIC_`)
-- `NEXT_PUBLIC_SITE_URL` (`http://localhost:3000` em desenvolvimento e `https://aster-crm-ai.vercel.app` em produção)
+- `NEXT_PUBLIC_SITE_URL` (`http://localhost:3000` somente em desenvolvimento e `https://app.asterclin.com.br` em produção)
 
 Cadastre no Supabase Auth as URLs permitidas:
 
 - `http://localhost:3000/auth/callback?next=/auth/accept-invite`
-- `https://aster-crm-ai.vercel.app/auth/callback?next=/auth/accept-invite`
+- `https://app.asterclin.com.br/auth/callback?next=/auth/accept-invite`
 
 ## Template “Invite user” do Supabase
 

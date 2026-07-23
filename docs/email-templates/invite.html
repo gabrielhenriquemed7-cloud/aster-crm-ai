@@ -2,51 +2,33 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="supported-color-schemes" content="light dark" />
-    <title>Bem-vindo ao ASTER CRM AI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="x-apple-disable-message-reformatting" />
+    <title>Você foi convidado para utilizar o ASTER CRM AI</title>
     <style>
-      @media (max-width: 620px) {
-        .wrap {
-          padding: 16px !important;
+      @media only screen and (max-width: 620px) {
+        .email-shell {
+          padding: 20px 12px !important;
         }
-        .card {
-          border-radius: 16px !important;
+        .email-card {
+          width: 100% !important;
         }
-        .content {
+        .email-content {
           padding: 32px 24px !important;
         }
-        .button {
+        .email-footer {
+          padding: 28px 24px !important;
+        }
+        .email-title {
+          font-size: 27px !important;
+          line-height: 34px !important;
+        }
+        .email-button {
           display: block !important;
-          width: auto !important;
         }
       }
-      @media (prefers-color-scheme: dark) {
-        body,
-        .wrap {
-          background: #0f172a !important;
-        }
-        .card {
-          background: #111827 !important;
-          border-color: #334155 !important;
-        }
-        .title,
-        .brand,
-        .body-text {
-          color: #f8fafc !important;
-        }
-        .muted,
-        .footer {
-          color: #cbd5e1 !important;
-        }
-        .link-box {
-          background: #1e293b !important;
-          color: #86efac !important;
-        }
-      }
-      .button:hover {
-        background: #15803d !important;
+      .email-button:hover {
+        background-color: #115e59 !important;
       }
     </style>
   </head>
@@ -54,272 +36,323 @@
     style="
       margin: 0;
       padding: 0;
-      background: #f8fafc;
+      width: 100%;
+      background-color: #f8fafc;
       color: #0f172a;
-      font-family: Inter, Arial, sans-serif;
+      font-family: Arial, Helvetica, sans-serif;
       -webkit-text-size-adjust: 100%;
-      word-spacing: normal;
+      -ms-text-size-adjust: 100%;
     "
   >
     <div
-      class="wrap"
       style="
-        width: 100%;
-        box-sizing: border-box;
-        background: #f8fafc;
-        padding: 40px 16px;
+        display: none;
+        max-height: 0;
+        overflow: hidden;
+        opacity: 0;
+        color: transparent;
       "
     >
-      <table
-        role="presentation"
-        width="100%"
-        cellspacing="0"
-        cellpadding="0"
-        border="0"
-      >
-        <tr>
-          <td align="center">
-            <table
-              class="card"
-              role="presentation"
-              width="100%"
-              cellspacing="0"
-              cellpadding="0"
-              border="0"
-              style="
-                max-width: 600px;
-                background: #ffffff;
-                border: 1px solid #e2e8f0;
-                border-radius: 20px;
-                box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
-                overflow: hidden;
-              "
-            >
-              <tr>
-                <td style="height: 5px; background: #16a34a; font-size: 0">
-                  &nbsp;
-                </td>
-              </tr>
-              <tr>
-                <td class="content" style="padding: 40px 48px">
-                  <div
-                    class="brand"
-                    style="
-                      text-align: center;
-                      color: #0f172a;
-                      font-size: 20px;
-                      font-weight: 800;
-                      letter-spacing: 0.08em;
-                    "
-                  >
-                    ASTER <span style="color: #16a34a">CRM AI</span>
-                  </div>
-                  <div
-                    class="muted"
-                    style="
-                      margin-top: 8px;
-                      text-align: center;
-                      color: #64748b;
-                      font-size: 13px;
-                    "
-                  >
-                    Inteligência para uma medicina mais eficiente.
-                  </div>
-                  <h1
-                    class="title"
-                    style="
-                      margin: 36px 0 18px;
-                      color: #0f172a;
-                      font-size: 30px;
-                      line-height: 1.2;
-                      text-align: center;
-                    "
-                  >
-                    Você foi convidado.
-                  </h1>
-                  <p
-                    class="body-text"
-                    style="
-                      margin: 0 0 16px;
-                      color: #0f172a;
-                      font-size: 16px;
-                      line-height: 1.7;
-                    "
-                  >
-                    {{ if .Data.full_name }}Olá, {{ .Data.full_name }},{{ else
-                    if .Email }}Olá, {{ .Email }},{{ else }}Olá,{{ end }}
-                  </p>
-                  <p
-                    class="body-text"
-                    style="
-                      margin: 0 0 16px;
-                      color: #0f172a;
-                      font-size: 16px;
-                      line-height: 1.7;
-                    "
-                  >
-                    Você foi convidado para acessar o ASTER CRM AI.
-                  </p>
-                  {{ if .Data.clinic_name }}
-                  <p
-                    class="body-text"
-                    style="
-                      margin: 0 0 16px;
-                      color: #0f172a;
-                      font-size: 16px;
-                      line-height: 1.7;
-                    "
-                  >
-                    Você foi convidado pela
-                    <strong>{{ .Data.clinic_name }}</strong>{{ if .Data.role }}
-                    para integrar a equipe como
-                    <strong>{{ .Data.role }}</strong>{{ end }}.
-                  </p>
-                  {{ end }}
-                  <p
-                    class="body-text"
-                    style="
-                      margin: 0 0 28px;
-                      color: #0f172a;
-                      font-size: 16px;
-                      line-height: 1.7;
-                    "
-                  >
-                    Sua conta já foi criada e está aguardando apenas a definição
-                    da sua senha. Clique abaixo para ativar seu acesso.
-                  </p>
-                  <table
-                    role="presentation"
-                    width="100%"
-                    cellspacing="0"
-                    cellpadding="0"
-                  >
-                    <tr>
-                      <td align="center">
-                        <a
-                          class="button"
-                          href="{{ .ConfirmationURL }}"
-                          aria-label="Ativar minha conta no ASTER CRM AI"
-                          style="
-                            display: inline-block;
-                            background: #16a34a;
-                            color: #ffffff;
-                            text-decoration: none;
-                            font-size: 15px;
-                            font-weight: 700;
-                            letter-spacing: 0.03em;
-                            border-radius: 10px;
-                            padding: 16px 24px;
-                          "
-                          >ATIVAR MINHA CONTA</a
-                        >
-                      </td>
-                    </tr>
-                  </table>
-                  <div
-                    style="
-                      margin: 28px 0 0;
-                      padding: 18px 20px;
-                      border: 1px solid #dcfce7;
-                      border-radius: 12px;
-                      color: #166534;
-                      font-size: 14px;
-                      line-height: 1.9;
-                    "
-                  >
-                    ✓ Convite seguro<br />✓ Link individual<br />✓ Expira
-                    automaticamente
-                  </div>
-                  <p
-                    class="muted"
-                    style="
-                      margin: 24px 0 8px;
-                      color: #64748b;
-                      font-size: 13px;
-                      line-height: 1.6;
-                      text-align: center;
-                    "
-                  >
-                    Este convite é pessoal e expira automaticamente.
-                  </p>
-                  <p
-                    class="muted"
-                    style="
-                      margin: 0;
-                      color: #64748b;
-                      font-size: 12px;
-                      line-height: 1.6;
-                    "
-                  >
-                    Caso o botão não funcione, copie o endereço:
-                  </p>
-                  <p
-                    class="link-box"
-                    style="
-                      margin: 8px 0 0;
-                      padding: 12px;
-                      background: #f8fafc;
-                      border-radius: 8px;
-                      color: #15803d;
-                      font-size: 12px;
-                      line-height: 1.5;
-                      word-break: break-all;
-                    "
-                  >
-                    <a
-                      href="{{ .ConfirmationURL }}"
-                      style="color: #15803d; text-decoration: underline"
-                      >{{ .ConfirmationURL }}</a
-                    >
-                  </p>
-                </td>
-              </tr>
-              <tr>
-                <td
+      Aceite seu convite e conclua seu cadastro no ASTER CRM AI.
+    </div>
+    <table
+      role="presentation"
+      width="100%"
+      cellspacing="0"
+      cellpadding="0"
+      border="0"
+      style="width: 100%; border-collapse: collapse; background-color: #f8fafc"
+    >
+      <tr>
+        <td class="email-shell" align="center" style="padding: 40px 16px">
+          <!--[if mso]><table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+          <table
+            class="email-card"
+            role="presentation"
+            width="600"
+            cellspacing="0"
+            cellpadding="0"
+            border="0"
+            style="
+              width: 100%;
+              max-width: 600px;
+              border-collapse: separate;
+              background-color: #ffffff;
+              border: 1px solid #e2e8f0;
+              border-radius: 18px;
+            "
+          >
+            <tr>
+              <td
+                height="6"
+                style="
+                  height: 6px;
+                  background-color: #14b8a6;
+                  border-radius: 18px 18px 0 0;
+                  font-size: 0;
+                  line-height: 0;
+                "
+              >
+                &nbsp;
+              </td>
+            </tr>
+            <tr>
+              <td class="email-content" style="padding: 42px 48px 36px">
+                <!-- LOGO_IMAGE: substitua ASTER_LOGO_URL pela URL pública da logomarca e use este bloco no lugar do wordmark abaixo:
+                <p style="margin: 0 0 10px; text-align: center;"><img src="ASTER_LOGO_URL" width="180" alt="ASTER CRM AI" style="display: inline-block; width: 180px; max-width: 100%; height: auto; border: 0;" /></p>
+                -->
+                <p
                   style="
-                    padding: 28px 32px;
-                    background: #0f172a;
+                    margin: 0;
+                    text-align: center;
+                    color: #0f172a;
+                    font-size: 21px;
+                    line-height: 28px;
+                    font-weight: 700;
+                    letter-spacing: 2px;
+                  "
+                >
+                  ASTER <span style="color: #0f766e">CRM AI</span>
+                </p>
+                <p
+                  style="
+                    margin: 7px 0 34px;
+                    text-align: center;
+                    color: #64748b;
+                    font-size: 13px;
+                    line-height: 20px;
+                  "
+                >
+                  Plataforma Inteligente para Clínicas
+                </p>
+                <h1
+                  class="email-title"
+                  style="
+                    margin: 0 0 24px;
+                    color: #0f172a;
+                    font-size: 30px;
+                    line-height: 38px;
+                    font-weight: 700;
                     text-align: center;
                   "
                 >
-                  <p
-                    style="
-                      margin: 0;
-                      color: #ffffff;
-                      font-size: 14px;
-                      font-weight: 700;
-                    "
+                  Você foi convidado para utilizar o ASTER CRM AI
+                </h1>
+                <p
+                  style="
+                    margin: 0 0 16px;
+                    color: #0f172a;
+                    font-size: 16px;
+                    line-height: 26px;
+                  "
+                >
+                  {{ if .Data.full_name }}Olá, {{ .Data.full_name }},{{ else if
+                  .Email }}Olá, {{ .Email }},{{ else }}Olá,{{ end }}
+                </p>
+                <p
+                  style="
+                    margin: 0 0 16px;
+                    color: #0f172a;
+                    font-size: 16px;
+                    line-height: 26px;
+                  "
+                >
+                  Você recebeu um convite para acessar uma clínica no ASTER CRM
+                  AI.
+                </p>
+                {{ if .Data.clinic_name }}
+                <p
+                  style="
+                    margin: 0 0 16px;
+                    color: #0f172a;
+                    font-size: 16px;
+                    line-height: 26px;
+                  "
+                >
+                  Clínica: <strong>{{ .Data.clinic_name }}</strong>{{ if
+                  .Data.role }} · Perfil: <strong>{{ .Data.role }}</strong>{{
+                  end }}
+                </p>
+                {{ end }}
+                <p
+                  style="
+                    margin: 0 0 28px;
+                    color: #0f172a;
+                    font-size: 16px;
+                    line-height: 26px;
+                  "
+                >
+                  Clique abaixo para criar sua senha e concluir seu cadastro.
+                </p>
+                <table
+                  role="presentation"
+                  width="100%"
+                  cellspacing="0"
+                  cellpadding="0"
+                  border="0"
+                  style="width: 100%; border-collapse: collapse"
+                >
+                  <tr>
+                    <td align="center" style="padding: 0 0 28px">
+                      <table
+                        role="presentation"
+                        cellspacing="0"
+                        cellpadding="0"
+                        border="0"
+                        style="border-collapse: separate"
+                      >
+                        <tr>
+                          <td
+                            align="center"
+                            bgcolor="#0F766E"
+                            style="border-radius: 10px"
+                          >
+                            <a
+                              class="email-button"
+                              href="{{ .ConfirmationURL }}"
+                              style="
+                                display: inline-block;
+                                padding: 16px 30px;
+                                border: 1px solid #0f766e;
+                                border-radius: 10px;
+                                background-color: #0f766e;
+                                color: #ffffff;
+                                font-size: 16px;
+                                line-height: 20px;
+                                font-weight: 700;
+                                text-decoration: none;
+                              "
+                              >Aceitar convite</a
+                            >
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+                <table
+                  role="presentation"
+                  width="100%"
+                  cellspacing="0"
+                  cellpadding="0"
+                  border="0"
+                  style="
+                    width: 100%;
+                    border-collapse: separate;
+                    background-color: #f8fafc;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 10px;
+                  "
+                >
+                  <tr>
+                    <td
+                      style="
+                        padding: 18px 20px;
+                        color: #64748b;
+                        font-size: 14px;
+                        line-height: 22px;
+                      "
+                    >
+                      <strong style="color: #0f172a">Importante:</strong> este
+                      convite expira automaticamente em 7 dias.<br />Se você não
+                      esperava este convite, ignore este e-mail.
+                    </td>
+                  </tr>
+                </table>
+                <p
+                  style="
+                    margin: 24px 0 8px;
+                    color: #64748b;
+                    font-size: 12px;
+                    line-height: 19px;
+                  "
+                >
+                  Se o botão não funcionar, copie e cole este endereço no
+                  navegador:
+                </p>
+                <p
+                  style="
+                    margin: 0;
+                    padding: 12px;
+                    background-color: #f8fafc;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 8px;
+                    color: #0f766e;
+                    font-size: 12px;
+                    line-height: 18px;
+                    word-break: break-all;
+                  "
+                >
+                  <a
+                    href="{{ .ConfirmationURL }}"
+                    style="color: #0f766e; text-decoration: underline"
+                    >{{ .ConfirmationURL }}</a
                   >
-                    ASTER CRM AI
-                  </p>
-                  <p
-                    class="footer"
-                    style="
-                      margin: 8px 0;
-                      color: #cbd5e1;
-                      font-size: 12px;
-                      line-height: 1.6;
-                    "
-                  >
-                    Tecnologia desenvolvida para transformar a gestão clínica.
-                  </p>
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td
+                class="email-footer"
+                style="
+                  padding: 30px 40px;
+                  background-color: #f8fafc;
+                  border-top: 1px solid #e2e8f0;
+                  border-radius: 0 0 18px 18px;
+                  text-align: center;
+                "
+              >
+                <p
+                  style="
+                    margin: 0 0 5px;
+                    color: #0f172a;
+                    font-size: 14px;
+                    line-height: 20px;
+                    font-weight: 700;
+                  "
+                >
+                  ASTER CRM AI
+                </p>
+                <p
+                  style="
+                    margin: 0 0 14px;
+                    color: #64748b;
+                    font-size: 12px;
+                    line-height: 19px;
+                  "
+                >
+                  Plataforma Inteligente para Clínicas
+                </p>
+                <p
+                  style="
+                    margin: 0;
+                    color: #64748b;
+                    font-size: 12px;
+                    line-height: 20px;
+                  "
+                >
                   <a
                     href="https://asterclin.com.br"
-                    style="color: #86efac; font-size: 12px"
+                    style="color: #0f766e; text-decoration: none"
                     >asterclin.com.br</a
+                  ><br />Suporte:
+                  <a
+                    href="mailto:joseval.med3@gmail.com"
+                    style="color: #0f766e; text-decoration: none"
+                    >joseval.med3@gmail.com</a
+                  ><br /><!-- ASTER_WHATSAPP_NUMBER: substitua 5500000000000 -->WhatsApp:
+                  <a
+                    href="https://wa.me/5500000000000"
+                    style="color: #0f766e; text-decoration: none"
+                    >fale com a ASTER</a
                   >
-                  <p
-                    class="footer"
-                    style="margin: 12px 0 0; color: #94a3b8; font-size: 11px"
-                  >
-                    © 2026 ASTER CRM AI
-                  </p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </div>
+                </p>
+              </td>
+            </tr>
+          </table>
+          <!--[if mso]></td></tr></table><![endif]-->
+        </td>
+      </tr>
+    </table>
   </body>
 </html>

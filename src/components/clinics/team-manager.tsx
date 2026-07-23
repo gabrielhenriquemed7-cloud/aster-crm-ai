@@ -70,6 +70,13 @@ export function TeamManager({
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [role, setRole] = useState<(typeof roles)[number]>("receptionist");
+  const [professional, setProfessional] = useState({
+    specialty: "",
+    council: "",
+    council_number: "",
+    council_state: "",
+    phone: "",
+  });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [removal, setRemoval] = useState<TeamRecord | null>(null);
@@ -87,6 +94,7 @@ export function TeamManager({
       email,
       full_name: fullName,
       role,
+      ...professional,
     });
     setSaving(false);
     await finish(result);
@@ -94,6 +102,13 @@ export function TeamManager({
       setEmail("");
       setFullName("");
       setRole("receptionist");
+      setProfessional({
+        specialty: "",
+        council: "",
+        council_number: "",
+        council_state: "",
+        phone: "",
+      });
     }
   }
 
@@ -164,6 +179,67 @@ export function TeamManager({
                   </option>
                 ))}
               </select>
+              <Input
+                value={professional.phone}
+                onChange={(event) =>
+                  setProfessional((current) => ({
+                    ...current,
+                    phone: event.target.value,
+                  }))
+                }
+                placeholder="Telefone (opcional)"
+              />
+              {role === "doctor" && (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <Input
+                    value={professional.specialty}
+                    onChange={(event) =>
+                      setProfessional((current) => ({
+                        ...current,
+                        specialty: event.target.value,
+                      }))
+                    }
+                    placeholder="Especialidade"
+                  />
+                  <Input
+                    value={professional.council}
+                    onChange={(event) =>
+                      setProfessional((current) => ({
+                        ...current,
+                        council: event.target.value,
+                      }))
+                    }
+                    placeholder="Conselho (ex.: CRM)"
+                    required
+                  />
+                  <Input
+                    value={professional.council_number}
+                    onChange={(event) =>
+                      setProfessional((current) => ({
+                        ...current,
+                        council_number: event.target.value,
+                      }))
+                    }
+                    placeholder="Número do conselho"
+                    required
+                  />
+                  <Input
+                    value={professional.council_state}
+                    onChange={(event) =>
+                      setProfessional((current) => ({
+                        ...current,
+                        council_state: event.target.value
+                          .toUpperCase()
+                          .slice(0, 2),
+                      }))
+                    }
+                    placeholder="UF"
+                    minLength={2}
+                    maxLength={2}
+                    required
+                  />
+                </div>
+              )}
               <p className="text-xs text-muted-foreground">
                 A validade segue a configuração de expiração de OTP do Supabase
                 Auth. O convite só pode ser aceito pelo e-mail informado.

@@ -65,5 +65,5 @@ export async function acceptClinicInvite(inviteId: string) {
           : "Não foi possível ativar seu acesso.",
     };
   }
-  redirect("/dashboard?invite=accepted");
+  redirect(`/auth/professional-onboarding?invite=${parsed.data}`);
 }

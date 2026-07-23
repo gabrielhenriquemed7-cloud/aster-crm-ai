@@ -29,6 +29,7 @@ export function AcceptInviteForm({
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const clinic = Array.isArray(invite?.clinics)
     ? invite?.clinics[0]?.name
     : invite?.clinics?.name;
@@ -73,7 +74,7 @@ export function AcceptInviteForm({
         Nova senha
         <Input
           className="mt-1"
-          type="password"
+          type={showPassword ? "text" : "password"}
           autoComplete="new-password"
           minLength={8}
           required
@@ -85,7 +86,7 @@ export function AcceptInviteForm({
         Confirmar senha
         <Input
           className="mt-1"
-          type="password"
+          type={showPassword ? "text" : "password"}
           autoComplete="new-password"
           minLength={8}
           required
@@ -93,6 +94,28 @@ export function AcceptInviteForm({
           onChange={(event) => setConfirmation(event.target.value)}
         />
       </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={showPassword}
+          onChange={(event) => setShowPassword(event.target.checked)}
+        />{" "}
+        Mostrar senha
+      </label>
+      <ul className="space-y-1 text-xs text-muted-foreground">
+        <li className={password.length >= 8 ? "text-emerald-700" : ""}>
+          ✓ Pelo menos 8 caracteres
+        </li>
+        <li
+          className={
+            Boolean(password) && password === confirmation
+              ? "text-emerald-700"
+              : ""
+          }
+        >
+          ✓ Senhas coincidentes
+        </li>
+      </ul>
       <Button className="w-full" type="submit" disabled={saving}>
         {saving && <Loader2 className="animate-spin" />}Aceitar convite e
         acessar o ASTER

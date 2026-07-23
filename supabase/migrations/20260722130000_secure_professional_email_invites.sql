@@ -12,10 +12,79 @@ alter table public.clinic_invites drop constraint if exists clinic_invites_statu
 alter table public.clinic_invites add constraint clinic_invites_status_check
   check (status in ('pending', 'sent', 'accepted', 'expired', 'cancelled', 'failed', 'revoked'));
 
-drop index if exists public.clinic_invites_pending_email_idx;
-create unique index clinic_invites_open_email_idx
-  on public.clinic_invites(clinic_id, lower(email))
-  where status in ('pending', 'sent', 'failed');
+do $$
+declare
+  existing_index_oid oid := to_regclass('public.clinic_invites_open_email_idx');
+  existing_definition text;
+  definition_matches boolean;
+begin
+  if existing_index_oid is null then
+    execute $index$
+      create unique index clinic_invites_open_email_idx
+        on public.clinic_invites using btree (clinic_id, lower(email))
+        where status in ('pending', 'sent', 'failed')
+    $index$;
+    return;
+  end if;
+
+  select
+    pg_get_indexdef(i.indexrelid),
+    i.indrelid = 'public.clinic_invites'::regclass
+      and i.indisunique
+      and i.indisvalid
+      and i.indisready
+      and i.indnkeyatts = 2
+      and i.indnatts = 2
+      and am.amname = 'btree'
+      and i.indkey[0] = (
+        select a.attnum
+        from pg_attribute a
+        where a.attrelid = 'public.clinic_invites'::regclass
+          and a.attname = 'clinic_id'
+          and not a.attisdropped
+      )
+      and i.indkey[1] = 0
+      and pg_get_indexdef(i.indexrelid, 2, true) = 'lower(email)'
+      and opc1.opcname = 'uuid_ops'
+      and opc2.opcname = 'text_ops'
+      and i.indoption[0] = 0
+      and i.indoption[1] = 0
+      and i.indcollation[0] = 0
+      and i.indcollation[1] = (
+        select a.attcollation
+        from pg_attribute a
+        where a.attrelid = 'public.clinic_invites'::regclass
+          and a.attname = 'email'
+          and not a.attisdropped
+      )
+      and pg_get_expr(i.indpred, i.indrelid) = any (array[
+        '(status = ANY (ARRAY[''pending''::text, ''sent''::text, ''failed''::text]))',
+        '(status = ANY (ARRAY[''pending''::text, ''failed''::text, ''sent''::text]))',
+        '(status = ANY (ARRAY[''sent''::text, ''pending''::text, ''failed''::text]))',
+        '(status = ANY (ARRAY[''sent''::text, ''failed''::text, ''pending''::text]))',
+        '(status = ANY (ARRAY[''failed''::text, ''pending''::text, ''sent''::text]))',
+        '(status = ANY (ARRAY[''failed''::text, ''sent''::text, ''pending''::text]))'
+      ])
+  into existing_definition, definition_matches
+  from pg_index i
+  join pg_class idx on idx.oid = i.indexrelid
+  join pg_am am on am.oid = idx.relam
+  join pg_opclass opc1 on opc1.oid = i.indclass[0]
+  join pg_opclass opc2 on opc2.oid = i.indclass[1]
+  where i.indexrelid = existing_index_oid;
+
+  if not coalesce(definition_matches, false) then
+    raise exception using
+      errcode = '42P07',
+      message = 'O índice public.clinic_invites_open_email_idx já existe com definição divergente.',
+      detail = format(
+        'Esperado: CREATE UNIQUE INDEX clinic_invites_open_email_idx ON public.clinic_invites USING btree (clinic_id, lower(email)) WHERE status IN (''pending'', ''sent'', ''failed''). Encontrado: %s',
+        coalesce(existing_definition, '<objeto não é um índice>')
+      ),
+      hint = 'Revise o índice manualmente; a migration não remove nem recria índices divergentes.';
+  end if;
+end;
+$$;
 
 create or replace function public.create_clinic_invite(invite_email text, invite_full_name text, invite_role text)
 returns uuid language plpgsql security definer set search_path = public as $$
@@ -64,7 +133,10 @@ begin
     jsonb_build_object('invite_id', invite_id, 'previous_status', old_status, 'new_status', new_status));
 end; $$;
 
-create or replace function public.renew_active_clinic_invite(invite_id uuid)
+begin;
+
+drop function if exists public.renew_active_clinic_invite(uuid);
+create function public.renew_active_clinic_invite(invite_id uuid)
 returns table(email text, full_name text, clinic_id uuid) language plpgsql security definer set search_path = public as $$
 declare selected_clinic_id uuid := public.current_clinic_admin_id(); last_delivery timestamptz;
 begin
@@ -77,8 +149,15 @@ begin
     returning ci.email, ci.full_name, ci.clinic_id;
 end; $$;
 
+alter function public.renew_active_clinic_invite(uuid) owner to postgres;
+revoke all on function public.renew_active_clinic_invite(uuid) from public;
+revoke all on function public.renew_active_clinic_invite(uuid) from anon;
+grant execute on function public.renew_active_clinic_invite(uuid) to authenticated;
+
+commit;
+
 drop function if exists public.revoke_active_clinic_invite(uuid);
-create function public.revoke_active_clinic_invite(invite_id uuid, reason text default null)
+create or replace function public.revoke_active_clinic_invite(invite_id uuid, reason text default null)
 returns void language plpgsql security definer set search_path = public as $$
 declare selected_clinic_id uuid := public.current_clinic_admin_id(); old_status text;
 begin

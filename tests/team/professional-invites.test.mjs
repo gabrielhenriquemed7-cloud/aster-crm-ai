@@ -8,6 +8,12 @@ const acceptancePath = "src/app/(auth)/auth/accept-invite/actions.ts";
 const formPath = "src/components/auth/accept-invite-form.tsx";
 const migrationPath =
   "supabase/migrations/20260722130000_secure_professional_email_invites.sql";
+const onboardingMigrationPath =
+  "supabase/migrations/20260722210000_complete_professional_invite_onboarding.sql";
+const onboardingActionPath =
+  "src/app/(auth)/auth/professional-onboarding/actions.ts";
+const onboardingFormPath =
+  "src/components/auth/professional-onboarding-form.tsx";
 
 test("service role and Supabase Admin invite remain server-only", async () => {
   const actions = await readFile(actionsPath, "utf8");
@@ -22,7 +28,31 @@ test("invite carries ASTER metadata and validated redirect", async () => {
   const actions = await readFile(actionsPath, "utf8");
   assert.match(actions, /clinic_name/);
   assert.match(actions, /invitation_id/);
-  assert.match(actions, /auth\/callback\?next=\/auth\/accept-invite/);
+  assert.match(actions, /getProfessionalInviteCallbackUrl/);
+  assert.match(actions, /APP_URL_CONFIGURATION_ERROR/);
+});
+
+test("invite button never uses signup confirmation APIs", async () => {
+  const actions = await readFile(actionsPath, "utf8");
+  assert.doesNotMatch(actions, /auth\.signUp|auth\.resend|generateLink/);
+  assert.match(actions, /auth\.admin\.inviteUserByEmail/);
+  assert.match(actions, /auth\.signInWithOtp/);
+  assert.match(actions, /shouldCreateUser:\s*false/);
+});
+
+test("invite delivery logs the selected flow without tokens or service keys", async () => {
+  const actions = await readFile(actionsPath, "utf8");
+  assert.match(actions, /ASTER_PROFESSIONAL_INVITE_AUTH/);
+  assert.match(actions, /magic_link/);
+  assert.match(actions, /userState/);
+  const structuredLog = actions.match(
+    /console\.info\("ASTER_PROFESSIONAL_INVITE_AUTH",[\s\S]*?\n\s*\}\);/,
+  )?.[0];
+  assert.ok(structuredLog);
+  assert.doesNotMatch(
+    structuredLog,
+    /token|serviceKey|SUPABASE_SERVICE_ROLE_KEY/,
+  );
 });
 
 test("opening the callback never activates membership", async () => {
@@ -67,4 +97,64 @@ test("RLS limits invite reads to the authenticated e-mail", async () => {
   const sql = await readFile(migrationPath, "utf8");
   assert.match(sql, /auth\.jwt\(\) ->> 'email'/);
   assert.match(sql, /lower\(email\)/);
+});
+
+test("professional fields are validated server-side and stored as invite metadata", async () => {
+  const actions = await readFile(actionsPath, "utf8");
+  const sql = await readFile(onboardingMigrationPath, "utf8");
+  assert.match(actions, /role === "doctor"/);
+  for (const field of [
+    "specialty",
+    "council",
+    "council_number",
+    "council_state",
+    "phone",
+  ]) {
+    assert.match(actions, new RegExp(field));
+    assert.match(sql, new RegExp(field));
+  }
+});
+
+test("acceptance is idempotent and keeps membership invited until onboarding", async () => {
+  const sql = await readFile(onboardingMigrationPath, "utf8");
+  assert.match(
+    sql,
+    /selected_invite\.status='accepted' and selected_invite\.auth_user_id=current_user_id/,
+  );
+  assert.match(sql, /'invited'/);
+  assert.match(
+    sql,
+    /onboarding_completed_at is not null then return destination/,
+  );
+  assert.match(sql, /set status='active'/);
+});
+
+test("onboarding cannot change clinic or role and destination is server-derived", async () => {
+  const action = await readFile(onboardingActionPath, "utf8");
+  const form = await readFile(onboardingFormPath, "utf8");
+  const sql = await readFile(onboardingMigrationPath, "utf8");
+  assert.doesNotMatch(form, /name="clinic_id"|name="role"/);
+  assert.doesNotMatch(action, /clinic_id:|role:/);
+  assert.match(sql, /case selected_invite\.role/);
+  assert.match(action, /complete_professional_invite_onboarding/);
+});
+
+test("audit covers invitation, password, onboarding and activation without secrets", async () => {
+  const sql = await readFile(onboardingMigrationPath, "utf8");
+  for (const event of [
+    "professional_invited",
+    "invitation_accepted",
+    "password_created",
+    "onboarding_started",
+    "onboarding_completed",
+    "user_activated",
+  ])
+    assert.match(sql, new RegExp(event));
+  assert.doesNotMatch(sql, /service_role/);
+});
+
+test("email delivery and database divergence returns a reconciliation error", async () => {
+  const actions = await readFile(actionsPath, "utf8");
+  assert.match(actions, /ASTER_INVITE_RECONCILIATION/);
+  assert.match(actions, /status precisa ser reconciliado/);
 });
