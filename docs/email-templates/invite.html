@@ -209,7 +209,7 @@
                           >
                             <a
                               class="email-button"
-                              href="{{ .ConfirmationURL }}"
+                              href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=invite"
                               style="
                                 display: inline-block;
                                 padding: 16px 30px;
@@ -284,9 +284,10 @@
                   "
                 >
                   <a
-                    href="{{ .ConfirmationURL }}"
+                    href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=invite"
                     style="color: #0f766e; text-decoration: underline"
-                    >{{ .ConfirmationURL }}</a
+                    >{{ .RedirectTo }}?token_hash={{ .TokenHash
+                    }}&amp;type=invite</a
                   >
                 </p>
               </td>

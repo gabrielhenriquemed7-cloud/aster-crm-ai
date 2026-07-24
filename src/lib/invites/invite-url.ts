@@ -76,5 +76,5 @@ export function resolveInviteSiteUrl({
 }
 
 export function buildProfessionalInviteRedirectTo(siteUrl: string) {
-  return `${siteUrl}/auth/callback?next=${encodeURIComponent("/auth/accept-invite")}`;
+  return `${siteUrl}/auth/callback`;
 }

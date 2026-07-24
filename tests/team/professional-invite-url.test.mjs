@@ -86,11 +86,11 @@ test("development permits localhost when public URL configuration is absent", ()
   assert.equal(siteUrl, DEVELOPMENT_INVITE_SITE_URL);
   assert.equal(
     buildProfessionalInviteRedirectTo(siteUrl),
-    "http://localhost:3000/auth/callback?next=%2Fauth%2Faccept-invite",
+    "http://localhost:3000/auth/callback",
   );
 });
 
-test("production callback encodes the next destination", () => {
+test("production callback contains no query string or fragment", () => {
   const siteUrl = resolveInviteSiteUrl({
     nodeEnv: "production",
     appUrl: "https://app.asterclin.com.br/",
@@ -99,6 +99,6 @@ test("production callback encodes the next destination", () => {
   });
   assert.equal(
     buildProfessionalInviteRedirectTo(siteUrl),
-    "https://app.asterclin.com.br/auth/callback?next=%2Fauth%2Faccept-invite",
+    "https://app.asterclin.com.br/auth/callback",
   );
 });

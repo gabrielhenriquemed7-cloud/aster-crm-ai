@@ -3,9 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const actionsPath = "src/app/(dashboard)/settings/team/actions.ts";
-const callbackPath = "src/components/auth/auth-callback-handler.tsx";
-const callbackPagePath = "src/app/auth/callback/page.tsx";
+const callbackPath = "src/app/auth/callback/route.ts";
 const callbackDestinationPath = "src/lib/auth/callback.ts";
+const inviteTemplatePath = "docs/email-templates/invite.html";
 const acceptancePath = "src/app/(auth)/auth/accept-invite/actions.ts";
 const formPath = "src/components/auth/accept-invite-form.tsx";
 const migrationPath =
@@ -32,6 +32,15 @@ test("invite carries ASTER metadata and validated redirect", async () => {
   assert.match(actions, /invitation_id/);
   assert.match(actions, /resolveServerInviteUrl/);
   assert.match(actions, /APP_URL_CONFIGURATION_ERROR/);
+});
+
+test("invite template sends token hash directly to the callback", async () => {
+  const template = await readFile(inviteTemplatePath, "utf8");
+  assert.match(
+    template,
+    /\{\{ \.RedirectTo \}\}\?token_hash=\{\{ \.TokenHash \}\}&type=invite/,
+  );
+  assert.doesNotMatch(template, /\{\{ \.ConfirmationURL \}\}/);
 });
 
 test("redirect diagnostic contains only safe URL resolution fields", async () => {
@@ -105,12 +114,10 @@ test("temporary delivery diagnostic exposes only safe operational fields", async
 
 test("callback establishes a session and never activates membership", async () => {
   const callback = await readFile(callbackPath, "utf8");
-  const callbackPage = await readFile(callbackPagePath, "utf8");
   assert.match(callback, /exchangeCodeForSession/);
   assert.match(callback, /verifyOtp/);
-  assert.match(callback, /setSession/);
-  assert.match(callback, /auth\.getUser/);
-  assert.match(callbackPage, /getSafeAuthCallbackDestination/);
+  assert.match(callback, /createServerClient/);
+  assert.match(callback, /response\.cookies\.set/);
   assert.doesNotMatch(callback, /accept_my_clinic_invites/);
   const acceptance = await readFile(acceptancePath, "utf8");
   assert.match(acceptance, /accept_my_clinic_invite/);
@@ -138,10 +145,45 @@ test("existing users accept membership without replacing their password", async 
 
 test("callback strips sensitive URL data and offers safe recovery actions", async () => {
   const callback = await readFile(callbackPath, "utf8");
-  assert.match(callback, /window\.history\.replaceState/);
   assert.match(callback, /Solicitar novo convite/);
-  assert.match(callback, /Voltar ao login/);
-  assert.doesNotMatch(callback, /console\.(log|info|error)/);
+  assert.match(callback, /Voltar para o login/);
+  assert.match(callback, /"Cache-Control": "no-store"/);
+  assert.match(callback, /"Referrer-Policy": "no-referrer"/);
+  assert.doesNotMatch(callback, /window\.location\.hash/);
+  assert.doesNotMatch(callback, /setSession/);
+  assert.doesNotMatch(callback, /onAuthStateChange/);
+  assert.doesNotMatch(callback, /poll/i);
+});
+
+test("callback diagnostic records only safe operational fields", async () => {
+  const callback = await readFile(callbackPath, "utf8");
+  assert.match(callback, /ASTER_AUTH_CALLBACK_DIAGNOSTIC/);
+  for (const field of [
+    "stage",
+    "hasTokenHash",
+    "type",
+    "verificationSucceeded",
+    "sessionCreated",
+    "redirectTarget",
+    "safeErrorCode",
+  ])
+    assert.match(callback, new RegExp(field));
+  const diagnostic = callback.match(/function diagnostic\([\s\S]*?\n\}/)?.[0];
+  assert.ok(diagnostic);
+  assert.doesNotMatch(
+    diagnostic,
+    /access_token|refresh_token|cookies|password|serviceRole|anonKey/i,
+  );
+});
+
+test("callback accepts only the invite destination", async () => {
+  const callback = await readFile(callbackPath, "utf8");
+  assert.match(callback, /INVITE_REDIRECT_TARGET = "\/auth\/accept-invite"/);
+  assert.match(
+    callback,
+    /verifyOtp\(\{\s*token_hash: tokenHash,\s*type: "invite"/,
+  );
+  assert.match(callback, /if \(type === "invite"\)/);
 });
 
 test("callback destination uses an explicit internal allowlist", async () => {
