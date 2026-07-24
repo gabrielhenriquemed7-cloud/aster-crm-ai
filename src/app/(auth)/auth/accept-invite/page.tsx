@@ -6,10 +6,14 @@ export default async function AcceptInvitePage() {
   const result = await getPendingInvite();
   return (
     <AuthShell
-      title="Aceitar convite"
-      description="Configure sua senha e confirme o vínculo com a clínica."
+      title="Bem-vindo ao ASTER CRM AI"
+      description="Você foi convidado para integrar uma clínica. Crie sua senha para concluir seu cadastro."
     >
-      <AcceptInviteForm invite={result.invite} initialError={result.error} />
+      <AcceptInviteForm
+        invite={result.invite}
+        initialError={result.error}
+        requiresPassword={result.requiresPassword}
+      />
     </AuthShell>
   );
 }

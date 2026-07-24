@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const actionsPath = "src/app/(dashboard)/settings/team/actions.ts";
-const callbackPath = "src/app/auth/callback/route.ts";
+const callbackPath = "src/components/auth/auth-callback-handler.tsx";
+const callbackPagePath = "src/app/auth/callback/page.tsx";
+const callbackDestinationPath = "src/lib/auth/callback.ts";
 const acceptancePath = "src/app/(auth)/auth/accept-invite/actions.ts";
 const formPath = "src/components/auth/accept-invite-form.tsx";
 const migrationPath =
@@ -101,8 +103,14 @@ test("temporary delivery diagnostic exposes only safe operational fields", async
   );
 });
 
-test("opening the callback never activates membership", async () => {
+test("callback establishes a session and never activates membership", async () => {
   const callback = await readFile(callbackPath, "utf8");
+  const callbackPage = await readFile(callbackPagePath, "utf8");
+  assert.match(callback, /exchangeCodeForSession/);
+  assert.match(callback, /verifyOtp/);
+  assert.match(callback, /setSession/);
+  assert.match(callback, /auth\.getUser/);
+  assert.match(callbackPage, /getSafeAuthCallbackDestination/);
   assert.doesNotMatch(callback, /accept_my_clinic_invites/);
   const acceptance = await readFile(acceptancePath, "utf8");
   assert.match(acceptance, /accept_my_clinic_invite/);
@@ -112,9 +120,36 @@ test("acceptance requires password confirmation and authenticated RPC", async ()
   const form = await readFile(formPath, "utf8");
   const acceptance = await readFile(acceptancePath, "utf8");
   assert.match(form, /password\.length < 8/);
+  assert.match(form, /\\d/);
+  assert.match(form, /A-Za-z/);
   assert.match(form, /password !== confirmation/);
-  assert.match(form, /auth\.updateUser\(\{ password \}\)/);
+  assert.match(acceptance, /auth\.updateUser\(\{/);
   assert.match(acceptance, /auth\.getUser/);
+});
+
+test("existing users accept membership without replacing their password", async () => {
+  const form = await readFile(formPath, "utf8");
+  const acceptance = await readFile(acceptancePath, "utf8");
+  assert.match(form, /Sua conta já existe/);
+  assert.match(form, /sem alterar sua[\s\S]*senha atual/);
+  assert.match(acceptance, /requiresPassword/);
+  assert.match(acceptance, /user_metadata\?\.invitation_id/);
+});
+
+test("callback strips sensitive URL data and offers safe recovery actions", async () => {
+  const callback = await readFile(callbackPath, "utf8");
+  assert.match(callback, /window\.history\.replaceState/);
+  assert.match(callback, /Solicitar novo convite/);
+  assert.match(callback, /Voltar ao login/);
+  assert.doesNotMatch(callback, /console\.(log|info|error)/);
+});
+
+test("callback destination uses an explicit internal allowlist", async () => {
+  const destination = await readFile(callbackDestinationPath, "utf8");
+  assert.match(destination, /allowedAuthCallbackDestinations/);
+  assert.match(destination, /"\/auth\/accept-invite"/);
+  assert.match(destination, /"\/reset-password"/);
+  assert.doesNotMatch(destination, /startsWith/);
 });
 
 test("migration enforces tenant, duplicate, expiry, cancellation, cooldown and audit", async () => {
