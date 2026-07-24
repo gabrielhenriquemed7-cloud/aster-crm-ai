@@ -257,9 +257,65 @@ test("onboarding cannot change clinic or role and destination is server-derived"
   const form = await readFile(onboardingFormPath, "utf8");
   const sql = await readFile(onboardingMigrationPath, "utf8");
   assert.doesNotMatch(form, /name="clinic_id"|name="role"/);
-  assert.doesNotMatch(action, /clinic_id:|role:/);
+  const rpcCall = action.match(
+    /supabase\.rpc\(\s*"complete_professional_invite_onboarding",[\s\S]*?\n\s*\);/,
+  )?.[0];
+  assert.ok(rpcCall);
+  assert.doesNotMatch(rpcCall, /clinic_id:|role:/);
   assert.match(sql, /case selected_invite\.role/);
   assert.match(action, /complete_professional_invite_onboarding/);
+});
+
+test("onboarding diagnostic exposes only safe operational fields", async () => {
+  const action = await readFile(onboardingActionPath, "utf8");
+  assert.match(action, /ASTER_ONBOARDING_DIAGNOSTIC/);
+  for (const field of [
+    "action",
+    "phase",
+    "stage",
+    "userIdPresent",
+    "invitationIdPresent",
+    "clinicIdPresent",
+    "role",
+    "profileUpdateSuccess",
+    "membershipUpdateSuccess",
+    "invitationAcceptSuccess",
+    "activeClinicUpdateSuccess",
+    "errorCode",
+    "errorMessage",
+    "errorDetails",
+    "errorHint",
+  ])
+    assert.match(action, new RegExp(field));
+  const diagnostic = action.match(
+    /function onboardingDiagnostic\([\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(diagnostic);
+  assert.doesNotMatch(
+    diagnostic,
+    /access_token|refresh_token|cookies|password|serviceRole|anonKey/i,
+  );
+  assert.match(
+    action,
+    /Falha ao concluir onboarding: \$\{stage\} — \$\{error\.code/,
+  );
+});
+
+test("onboarding schema mismatch rejects non-professional roles", async () => {
+  const onboardingSql = await readFile(onboardingMigrationPath, "utf8");
+  const professionalProfileSql = await readFile(
+    "supabase/migrations/20260711190000_clinic_identity_and_professional_profiles.sql",
+    "utf8",
+  );
+  assert.match(onboardingSql, /insert into public\.professional_profiles/);
+  assert.match(
+    professionalProfileSql,
+    /target_role not in \('doctor','clinic_admin'\)/,
+  );
+  assert.match(
+    professionalProfileSql,
+    /O profissional precisa ter vínculo ativo com a clínica/,
+  );
 });
 
 test("audit covers invitation, password, onboarding and activation without secrets", async () => {
